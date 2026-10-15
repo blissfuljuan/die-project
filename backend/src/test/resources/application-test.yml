@@ -2,3 +2,7 @@
 die:
   mail:
     mode: log
+  bootstrap:
+    # Never create an administrator at startup, whatever a developer's environment says.
+    admin-email: ""
+    admin-password: ""

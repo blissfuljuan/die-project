@@ -3,6 +3,8 @@ spring:
   # requested explicitly (SPRING_PROFILES_ACTIVE=local). See config/ProductionSafetyCheck.
   application:
     name: die-api
+  config:
+    import: optional:file:.env[.properties]
   datasource:
     # Runtime identity: least-privileged application role (no DDL).
     url: ${DB_URL:jdbc:postgresql://localhost:5432/die}
@@ -88,3 +90,13 @@ management:
 springdoc:
   api-docs:
     path: /v3/api-docs
+  swagger-ui:
+    csrf:
+      # Swagger UI reads the XSRF-TOKEN cookie and sends it as X-XSRF-TOKEN, so POST/PUT/DELETE "Try it out"
+      # calls work. Call GET /api/v1/auth/csrf once first (it sets the cookie).
+      enabled: true
+
+logging:
+  pattern:
+    # Every log line carries the request id that is also returned as X-Request-Id and in error bodies (traceId).
+    level: "%5p [%X{requestId:-}]"

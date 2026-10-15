@@ -5,7 +5,7 @@ AI-assisted academic evaluation platform. See [CLAUDE.md](CLAUDE.md) for invaria
 ## Layout
 | Path | Purpose |
 |---|---|
-| `backend/` | Spring Boot API (`/api/v1`), Flyway migrations in `src/main/resources/db/migration` |
+| `backend/` | Spring Boot API (`/api/v1`), base package `com.blissfuljuan.die`, MVC layout per module (`<module>/{controller,view,model,service,repository}`), Flyway migrations in `src/main/resources/db/migration` |
 | `frontend/` | React + TypeScript + Vite |
 | `workers/orchestrator/` | Java evaluation orchestration worker |
 | `workers/document-analysis/` | Python DOCX/PDF analysis worker |
