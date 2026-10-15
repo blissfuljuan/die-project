@@ -1,0 +1,119 @@
+# Local development stack.
+#   docker compose up -d                 -> Postgres + RabbitMQ (infrastructure only)
+#   docker compose --profile apps up -d --build   -> also API, workers, frontend (once their sources exist)
+name: die
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    <<: *restart
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-die}
+      POSTGRES_USER: ${POSTGRES_MIGRATOR_USER:-die_migrator}
+      POSTGRES_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?set in .env}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-die_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    <<: *restart
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-die}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set in .env}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-die.conf:ro
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    profiles: [apps]
+    build: ./backend
+    <<: *restart
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-die}
+      DB_APP_USER: ${POSTGRES_APP_USER:-die_app}
+      DB_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+      DB_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-die_migrator}
+      DB_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-die}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    ports:
+      - "8080:8080"
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+
+  orchestrator:
+    profiles: [apps]
+    build: ./workers/orchestrator
+    <<: *restart
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-die}
+      DB_APP_USER: ${POSTGRES_APP_USER:-die_app}
+      DB_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-die}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:-}
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+
+  document-worker:
+    profiles: [apps]
+    build: ./workers/document-analysis
+    <<: *restart
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-die}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+  frontend:
+    profiles: [apps]
+    build: ./frontend
+    ports:
+      - "5173:8080"
+    depends_on: [api]
+
+volumes:
+  postgres-data:
+  rabbitmq-data:

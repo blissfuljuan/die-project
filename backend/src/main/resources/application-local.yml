@@ -1,0 +1,23 @@
+# Local development overrides (docker compose / IDE).
+server:
+  servlet:
+    session:
+      cookie:
+        secure: false
+spring:
+  datasource:
+    # Runtime identity: least-privileged application role (no DDL).
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/die}
+    username: ${DB_APP_USER:postgres}
+    password: ${DB_APP_PASSWORD:postgres}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  flyway:
+    # Migrations run as the schema owner, never as the application role.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/die}
+    user: ${DB_MIGRATOR_USER:postgres}
+    password: ${DB_MIGRATOR_PASSWORD:postgres}
+# Development only: print emails (with activation/reset links) instead of sending them.
+die:
+  mail:
+    mode: log

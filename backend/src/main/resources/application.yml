@@ -1,0 +1,90 @@
+spring:
+  # No default profile on purpose: development defaults live in application-local.yml and must be
+  # requested explicitly (SPRING_PROFILES_ACTIVE=local). See config/ProductionSafetyCheck.
+  application:
+    name: die-api
+  datasource:
+    # Runtime identity: least-privileged application role (no DDL).
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/die}
+    username: ${DB_APP_USER:postgres}
+    password: ${DB_APP_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  flyway:
+    # Migrations run as the schema owner, never as the application role.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/die}
+    user: ${DB_MIGRATOR_USER:die_migrator}
+    password: ${DB_MIGRATOR_PASSWORD:}
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+  mvc:
+    problemdetails:
+      enabled: true
+  servlet:
+    multipart:
+      # Roster uploads only. The parser enforces the same cap again (die.roster.max-bytes).
+      max-file-size: 5MB
+      max-request-size: 6MB
+  session:
+    # Schema is owned by Flyway (V2__identity.sql).
+    jdbc:
+      initialize-schema: never
+
+die:
+  auth:
+    max-failed-per-identifier: 5
+    max-failed-per-ip: 20
+    throttle-window-minutes: 15
+    temp-credential-days: 14
+    temp-credential-max-attempts: 5
+    email-verification-hours: 24
+  roster:
+    max-rows: 500          # temp credentials are Argon2-hashed per new student, so keep imports class-sized
+    max-bytes: 5242880
+    max-concurrent-commits: 2   # per API instance; each user can also run only one commit at a time
+  credentials:
+    # Bulk Argon2 hashing (roster commit) runs on its own small pool, outside any database transaction.
+    hash-threads: 4        # ~16 MB of memory per running hash
+    hash-queue: 1000
+    hash-timeout-seconds: 120
+  frontend-base-url: ${DIE_FRONTEND_BASE_URL:http://localhost:5173}
+  mail:
+    # smtp = real delivery (also set spring.mail.* and die.mail.from). log = print emails, including
+    # activation/reset links, to the log: DEV ONLY, enabled by the local/test profiles.
+    mode: ${DIE_MAIL_MODE:smtp}
+    from: ${DIE_MAIL_FROM:no-reply@die.local}
+  bootstrap:
+    # First-run only: creates an admin when none exists. Remove after first start.
+    admin-email: ${DIE_BOOTSTRAP_ADMIN_EMAIL:}
+    admin-password: ${DIE_BOOTSTRAP_ADMIN_PASSWORD:}
+
+server:
+  port: 8080
+  shutdown: graceful
+  # native = Tomcat RemoteIpValve: request.getRemoteAddr() becomes the real client address, taken from
+  # X-Forwarded-For only when the connection comes from a trusted (private-range) proxy, so a client
+  # cannot spoof it. Login/reset throttling depends on this being correct.
+  forward-headers-strategy: native
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        secure: ${SESSION_COOKIE_SECURE:true}
+        same-site: lax
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs

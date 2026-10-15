@@ -1,0 +1,4 @@
+# Integration tests: capture mail in-process, no SMTP.
+die:
+  mail:
+    mode: log

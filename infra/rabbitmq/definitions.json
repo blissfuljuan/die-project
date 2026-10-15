@@ -1,0 +1,27 @@
+{
+  "vhosts": [{ "name": "/" }],
+  "exchanges": [
+    { "name": "die.evaluation", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "die.evaluation.retry", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "die.evaluation.dlx", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "die.document", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "die.document.dlx", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {} }
+  ],
+  "queues": [
+    { "name": "evaluation.jobs", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum", "x-dead-letter-exchange": "die.evaluation.retry", "x-dead-letter-routing-key": "jobs" } },
+    { "name": "evaluation.jobs.retry", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-queue-type": "classic", "x-message-ttl": 30000, "x-dead-letter-exchange": "die.evaluation", "x-dead-letter-routing-key": "jobs" } },
+    { "name": "evaluation.jobs.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } },
+    { "name": "document.analyze", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum", "x-dead-letter-exchange": "die.document.dlx", "x-dead-letter-routing-key": "analyze" } },
+    { "name": "document.analyze.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } }
+  ],
+  "bindings": [
+    { "source": "die.evaluation", "vhost": "/", "destination": "evaluation.jobs", "destination_type": "queue", "routing_key": "jobs", "arguments": {} },
+    { "source": "die.evaluation.retry", "vhost": "/", "destination": "evaluation.jobs.retry", "destination_type": "queue", "routing_key": "jobs", "arguments": {} },
+    { "source": "die.evaluation.dlx", "vhost": "/", "destination": "evaluation.jobs.dlq", "destination_type": "queue", "routing_key": "jobs", "arguments": {} },
+    { "source": "die.document", "vhost": "/", "destination": "document.analyze", "destination_type": "queue", "routing_key": "analyze", "arguments": {} },
+    { "source": "die.document.dlx", "vhost": "/", "destination": "document.analyze.dlq", "destination_type": "queue", "routing_key": "analyze", "arguments": {} }
+  ]
+}
