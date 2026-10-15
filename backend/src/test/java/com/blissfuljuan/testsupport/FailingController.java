@@ -1,6 +1,6 @@
 package com.blissfuljuan.testsupport;
 
-import com.blissfuljuan.die.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ApiException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -9,7 +9,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * Endpoints that fail in specific ways, for testing the global error handler. Deliberately OUTSIDE the
- * com.blissfuljuan.die package so component scanning never registers it; tests opt in with @Import.
+ * com.blissfuljuan.dieapi package so component scanning never registers it; tests opt in with @Import.
  */
 @RestController
 @RequestMapping("/api/v1/test")
