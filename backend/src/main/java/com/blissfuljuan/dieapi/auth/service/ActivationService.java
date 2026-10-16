@@ -20,6 +20,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -128,14 +129,14 @@ public class ActivationService {
     @Transactional
     public ActivationStatusView verifyEmail(String token) {
         VerificationLink row = repository.lockLiveVerification(sha256(token))
-            .orElseThrow(() -> ApiException.badRequest("VERIFICATION_LINK_INVALID", INVALID_LINK));
+            .orElseThrow(() -> ApiException.badRequest(ErrorCode.VERIFICATION_LINK_INVALID, INVALID_LINK));
 
         UUID userId = row.userId();
         boolean consistent = row.tokenEmail().equals(row.userEmail())
             && AccountStatus.PENDING_ACTIVATION.name().equals(row.status())
             && row.hasPassword();
         if (!consistent) {
-            throw ApiException.badRequest("VERIFICATION_LINK_INVALID", INVALID_LINK);
+            throw ApiException.badRequest(ErrorCode.VERIFICATION_LINK_INVALID, INVALID_LINK);
         }
         repository.consumeVerificationToken(row.tokenId());
         repository.markEmailVerifiedAndActive(userId);
@@ -164,13 +165,13 @@ public class ActivationService {
             found.ifPresent(p -> recordCredentialFailure(p));
             throttle.record(throttleKey, clientIp, false);
             events.publishEvent(AuditEvent.of(found.map(PendingActivation::userId).orElse(null), AuditAction.ACTIVATION_FAILED, AuditResource.AUTH, null, Map.of()));
-            throw ApiException.unauthorized("ACTIVATION_CREDENTIALS_INVALID", INVALID);
+            throw ApiException.unauthorized(ErrorCode.ACTIVATION_CREDENTIALS_INVALID, INVALID);
         }
         PendingActivation p = found.get();
         if (p.expiresAt().isBefore(OffsetDateTime.now())) {
             tempCredentials.invalidateActive(p.userId(), "EXPIRED");
             throttle.record(throttleKey, clientIp, false);
-            throw ApiException.unauthorized("ACTIVATION_CREDENTIALS_INVALID", INVALID);
+            throw ApiException.unauthorized(ErrorCode.ACTIVATION_CREDENTIALS_INVALID, INVALID);
         }
         return p;
     }

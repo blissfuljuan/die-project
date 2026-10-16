@@ -1,6 +1,6 @@
 package com.blissfuljuan.dieapi.config;
 
-import com.blissfuljuan.dieapi.account.model.AccountStatus;
+import com.blissfuljuan.dieapi.account.repository.AccountRepository;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -9,7 +9,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -29,10 +28,10 @@ public class SessionRevalidationFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(SessionRevalidationFilter.class);
 
-    private final JdbcClient jdbc;
+    private final AccountRepository accounts;
 
-    public SessionRevalidationFilter(JdbcClient jdbc) {
-        this.jdbc = jdbc;
+    public SessionRevalidationFilter(AccountRepository accounts) {
+        this.accounts = accounts;
     }
 
     @Override
@@ -51,10 +50,6 @@ public class SessionRevalidationFilter extends OncePerRequestFilter {
     }
 
     private boolean stillValid(AppUserDetails user) {
-        return jdbc.sql("SELECT status, role FROM app_user WHERE id = :id")
-            .param("id", user.getId())
-            .query((rs, n) -> AccountStatus.ACTIVE.name().equals(rs.getString("status")) && user.getRole().equals(rs.getString("role")))
-            .optional()
-            .orElse(false);
+        return accounts.isActiveWithRole(user.getId(), user.getRole());
     }
 }

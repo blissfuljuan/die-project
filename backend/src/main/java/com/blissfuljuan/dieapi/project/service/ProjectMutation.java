@@ -6,6 +6,7 @@ import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
 import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.LockedProject;
 import com.blissfuljuan.dieapi.project.model.ProjectRow;
 import com.blissfuljuan.dieapi.project.model.ProjectStatus;
@@ -59,7 +60,7 @@ public class ProjectMutation {
         var cls = lockWritableClass(classId);
         ProjectRow p = repo.lock(projectId).orElseThrow(AccessPolicy::projectNotFound);
         if (p.status() != ProjectStatus.ACTIVE) {
-            throw ApiException.conflict("PROJECT_ARCHIVED", "The project is archived and read-only");
+            throw ApiException.conflict(ErrorCode.PROJECT_ARCHIVED, "The project is archived and read-only");
         }
         return new LockedProject(p, cls);
     }
@@ -78,7 +79,7 @@ public class ProjectMutation {
         var cls = classes.lock(classId).orElseThrow(AccessPolicy::classNotFound);
         ProjectRow p = repo.lock(projectId).orElseThrow(AccessPolicy::projectNotFound);
         if (cls.status() == ClassStatus.ARCHIVED) {
-            throw ApiException.conflict("CLASS_ARCHIVED", "The class is archived");
+            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The class is archived");
         }
         return new LockedProject(p, cls);
     }
@@ -86,7 +87,7 @@ public class ProjectMutation {
     public LockedClass lockWritableClass(UUID classId) {
         var cls = classes.lock(classId).orElseThrow(AccessPolicy::classNotFound);
         if (cls.status() == ClassStatus.ARCHIVED) {
-            throw ApiException.conflict("CLASS_ARCHIVED", "The class is archived and read-only");
+            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The class is archived and read-only");
         }
         return cls;
     }

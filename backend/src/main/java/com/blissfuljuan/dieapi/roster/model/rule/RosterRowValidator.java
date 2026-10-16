@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.roster.model.rule;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.roster.model.GridRow;
 import com.blissfuljuan.dieapi.roster.model.NormalizedRow;
 import com.blissfuljuan.dieapi.roster.model.RosterField;
@@ -48,7 +49,7 @@ public final class RosterRowValidator {
         for (int i = 0; i < grid.size(); i++) {
             if (grid.get(i).cells().stream().anyMatch(c -> !c.isBlank())) { headerIndex = i; break; }
         }
-        if (headerIndex < 0) throw bad("HEADER_ROW_MISSING", "The file has no header row");
+        if (headerIndex < 0) throw bad(ErrorCode.HEADER_ROW_MISSING, "The file has no header row");
 
         Map<RosterField, Integer> columns = mapHeader(grid.get(headerIndex).cells());
 
@@ -57,11 +58,11 @@ public final class RosterRowValidator {
             GridRow g = grid.get(i);
             if (g.cells().stream().allMatch(String::isBlank) && !g.hasFormula()) continue;
             if (rows.size() >= maxRows) {
-                throw bad("TOO_MANY_ROWS", "Too many rows (maximum " + maxRows + " per import)");
+                throw bad(ErrorCode.TOO_MANY_ROWS, "Too many rows (maximum " + maxRows + " per import)");
             }
             rows.add(normalize(g, columns));
         }
-        if (rows.isEmpty()) throw bad("NO_DATA_ROWS", "The file has no data rows");
+        if (rows.isEmpty()) throw bad(ErrorCode.NO_DATA_ROWS, "The file has no data rows");
         return rows;
     }
 
@@ -71,7 +72,7 @@ public final class RosterRowValidator {
             RosterField f = HEADERS.get(header.get(c).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", ""));
             if (f == null) continue;
             if (columns.putIfAbsent(f, c) != null) {
-                throw bad("DUPLICATE_COLUMN", "Duplicate column for " + f.label());
+                throw bad(ErrorCode.DUPLICATE_COLUMN, "Duplicate column for " + f.label());
             }
         }
         List<String> missing = new ArrayList<>();
@@ -79,7 +80,7 @@ public final class RosterRowValidator {
             if (!columns.containsKey(f)) missing.add(f.label());
         }
         if (!missing.isEmpty()) {
-            throw bad("MISSING_COLUMNS", "Missing required column(s): " + String.join(", ", missing));
+            throw bad(ErrorCode.MISSING_COLUMNS, "Missing required column(s): " + String.join(", ", missing));
         }
         return columns;
     }
@@ -137,7 +138,7 @@ public final class RosterRowValidator {
         return v == null ? null : (v.length() > MAX_STORED_CHARS ? v.substring(0, MAX_STORED_CHARS) : v);
     }
 
-    private static ApiException bad(String code, String reason) {
+    private static ApiException bad(ErrorCode code, String reason) {
         return ApiException.badRequest(code, reason);
     }
 }

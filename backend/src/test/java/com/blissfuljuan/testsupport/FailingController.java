@@ -1,6 +1,6 @@
 package com.blissfuljuan.testsupport;
 
-import com.blissfuljuan.dieapi.common.exception.ApiException;
+import org.springframework.http.HttpStatus;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,6 +32,6 @@ public class FailingController {
 
     @GetMapping("/api-error")
     String apiError() {
-        throw ApiException.conflict("CUSTOM_CODE", "A custom, person-readable message.");
+        throw new CustomCodeException(HttpStatus.CONFLICT, "CUSTOM_CODE", "A custom, person-readable message.");
     }
 }

@@ -11,6 +11,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.academic.model.ClassStatus;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.common.util.Tokens;
 import com.blissfuljuan.dieapi.roster.model.*;
 import com.blissfuljuan.dieapi.roster.repository.RosterImportRepository;
@@ -96,16 +97,16 @@ public class RosterImportService {
     public ImportView resolve(AppUserDetails user, UUID importId, List<ResolutionChange> changes) {
         ImportHeader h = queries.header(user, importId, true);
         requirePreview(h);
-        if (changes == null || changes.isEmpty()) throw bad("RESOLUTIONS_REQUIRED", "resolutions must not be empty");
+        if (changes == null || changes.isEmpty()) throw bad(ErrorCode.RESOLUTIONS_REQUIRED, "resolutions must not be empty");
         for (ResolutionChange c : changes) {
-            StoredRow row = repo.row(importId, c.rowNumber()).orElseThrow(() -> bad("ROW_NOT_FOUND", "Row " + c.rowNumber() + " does not exist"));
+            StoredRow row = repo.row(importId, c.rowNumber()).orElseThrow(() -> bad(ErrorCode.ROW_NOT_FOUND, "Row " + c.rowNumber() + " does not exist"));
             if (row.action() != RowOutcome.CONFLICT) {
-                throw bad("ROW_NOT_A_CONFLICT", "Row " + c.rowNumber() + " is not a conflict");
+                throw bad(ErrorCode.ROW_NOT_A_CONFLICT, "Row " + c.rowNumber() + " is not a conflict");
             }
             ResolutionAction chosen = ResolutionAction.parse(c.resolution());
             List<ResolutionAction> allowed = resolvers.forKind(row.conflictKind()).allowed();
             if (chosen == null || !allowed.contains(chosen)) {
-                throw bad("RESOLUTION_NOT_ALLOWED", "Row " + c.rowNumber() + " (" + row.conflictKind() + ") accepts only "
+                throw bad(ErrorCode.RESOLUTION_NOT_ALLOWED, "Row " + c.rowNumber() + " (" + row.conflictKind() + ") accepts only "
                     + allowed);
             }
             repo.setResolution(importId, c.rowNumber(), chosen);
@@ -167,11 +168,11 @@ public class RosterImportService {
         List<StoredRow> stored = repo.allRows(importId);
         int unresolved = repo.summary(importId).unresolvedConflicts();
         if (unresolved > 0) {
-            throw ApiException.conflict("UNRESOLVED_CONFLICTS", unresolved + " conflict(s) still need a resolution");
+            throw ApiException.conflict(ErrorCode.UNRESOLVED_CONFLICTS, unresolved + " conflict(s) still need a resolution");
         }
         support.assertUnchangedSincePreview(classId, stored, user);
         if (stored.stream().filter(r -> r.action() == RowOutcome.CREATE).count() != prepared.size()) {
-            throw ApiException.conflict("IMPORT_CHANGED", "The import changed while it was being prepared; try again");
+            throw ApiException.conflict(ErrorCode.IMPORT_CHANGED, "The import changed while it was being prepared; try again");
         }
 
         CommitResult result = applier.apply(importId, classId, stored, user.getId(), prepared);
@@ -195,7 +196,7 @@ public class RosterImportService {
     public void cancel(AppUserDetails user, UUID importId) {
         ImportHeader h = queries.header(user, importId, true);
         if (h.status() == ImportStatus.COMMITTED) {
-            throw ApiException.conflict("IMPORT_ALREADY_COMMITTED", "A committed import cannot be cancelled");
+            throw ApiException.conflict(ErrorCode.IMPORT_ALREADY_COMMITTED, "A committed import cannot be cancelled");
         }
         if (h.status() == ImportStatus.PREVIEW) {
             repo.setStatus(importId, ImportStatus.CANCELLED);
@@ -209,17 +210,17 @@ public class RosterImportService {
     private void assertWritable(UUID classId) {
         var cls = classes.lock(classId).orElseThrow(AccessPolicy::classNotFound);
         if (cls.status() == ClassStatus.ARCHIVED) {
-            throw ApiException.conflict("CLASS_ARCHIVED", "The class is archived and read-only");
+            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The class is archived and read-only");
         }
     }
 
     private static void requirePreview(ImportHeader h) {
         if (h.status() != ImportStatus.PREVIEW) {
-            throw ApiException.conflict("IMPORT_NOT_PENDING", "The import is " + h.status().name().toLowerCase());
+            throw ApiException.conflict(ErrorCode.IMPORT_NOT_PENDING, "The import is " + h.status().name().toLowerCase());
         }
     }
 
-    private static ApiException bad(String code, String reason) {
+    private static ApiException bad(ErrorCode code, String reason) {
         return ApiException.badRequest(code, reason);
     }
 }

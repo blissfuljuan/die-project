@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.roster.service;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.roster.model.GridRow;
 import com.blissfuljuan.dieapi.roster.model.NormalizedRow;
 import com.blissfuljuan.dieapi.roster.model.rule.RosterRowValidator;
@@ -34,10 +35,10 @@ public class RosterParser {
 
     public List<NormalizedRow> parse(String fileName, byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
-            throw ApiException.badRequest("FILE_EMPTY", "The file is empty");
+            throw ApiException.badRequest(ErrorCode.FILE_EMPTY, "The file is empty");
         }
         if (bytes.length > maxBytes) {
-            throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "FILE_TOO_LARGE",
+            throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.FILE_TOO_LARGE,
                 "The file is larger than " + (maxBytes / 1024 / 1024) + " MB");
         }
         List<GridRow> grid = readers.forFile(fileName).read(bytes);

@@ -17,7 +17,8 @@ import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
-import com.blissfuljuan.dieapi.project.repository.ProjectRepository;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
+import com.blissfuljuan.dieapi.academic.service.port.ClassTeamStats;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,16 +42,16 @@ public class ClassService {
     private final ApplicationEventPublisher events;
     private final ClassLocks locks;
     private final ClassInstructorService instructors;
-    private final ProjectRepository projectRepository;
+    private final ClassTeamStats teamStats;
 
     public ClassService(ClassRepository repo, AccessPolicy policy, ApplicationEventPublisher events, ClassLocks locks,
-                        ClassInstructorService instructors, ProjectRepository projectRepository) {
+                        ClassInstructorService instructors, ClassTeamStats teamStats) {
         this.repo = repo;
         this.policy = policy;
         this.events = events;
         this.locks = locks;
         this.instructors = instructors;
-        this.projectRepository = projectRepository;
+        this.teamStats = teamStats;
     }
 
     // ---- queries ----
@@ -61,7 +62,7 @@ public class ClassService {
         if (status != null) {
             statusFilter = ClassStatus.parse(status);
             if (statusFilter == null) {
-                throw ApiException.badRequest("INVALID_STATUS_FILTER", "status must be ACTIVE or ARCHIVED");
+                throw ApiException.badRequest(ErrorCode.INVALID_STATUS_FILTER, "status must be ACTIVE or ARCHIVED");
             }
         }
         return repo.search(policy.visibleClasses(user), statusFilter, q, Math.max(page, 0), Math.min(Math.max(size, 1), 100));
@@ -81,7 +82,7 @@ public class ClassService {
         if (user.role() == UserRole.ADMIN) {
             teaching = distinct(req.instructorIds());
             if (teaching.isEmpty()) {
-                throw ApiException.badRequest("INSTRUCTORS_REQUIRED", "instructorIds must list at least one instructor");
+                throw ApiException.badRequest(ErrorCode.INSTRUCTORS_REQUIRED, "instructorIds must list at least one instructor");
             }
         } else {
             teaching = List.of(user.getId()); // an instructor creating a class teaches it
@@ -105,11 +106,11 @@ public class ClassService {
 
     @Transactional
     public ClassView update(AppUserDetails user, UUID classId, UpdateClass req) {
-        if (req.version() == null) throw ApiException.badRequest("VERSION_REQUIRED", "version is required");
+        if (req.version() == null) throw ApiException.badRequest(ErrorCode.VERSION_REQUIRED, "version is required");
         policy.requireClassManage(user, classId);
         LockedClass cur = locks.lockWritable(classId);
         if (cur.version() != req.version()) {
-            throw ApiException.conflict("CLASS_VERSION_CONFLICT", "The class was modified by someone else; reload and retry");
+            throw ApiException.conflict(ErrorCode.CLASS_VERSION_CONFLICT, "The class was modified by someone else; reload and retry");
         }
         NewClass next = fields(
             pick(req.academicYear(), cur.academicYear(), "academicYear"), pick(req.semester(), cur.semester(), "semester"),
@@ -121,9 +122,9 @@ public class ClassService {
             req.studentsMayChangeTeams() == null ? cur.studentsMayChangeTeams() : req.studentsMayChangeTeams(),
             null);
         // Team-policy changes must not silently invalidate teams that already exist.
-        int largestTeam = projectRepository.maxActiveTeamSize(classId);
+        int largestTeam = teamStats.largestActiveTeamSize(classId);
         if (next.teamMaxSize() < largestTeam) {
-            throw ApiException.conflict("TEAM_SIZE_BELOW_EXISTING_TEAM", "An existing team has " + largestTeam
+            throw ApiException.conflict(ErrorCode.TEAM_SIZE_BELOW_EXISTING_TEAM, "An existing team has " + largestTeam
                 + " members, which exceeds the new maximum of " + next.teamMaxSize() + "; adjust that team first");
         }
         repo.update(classId, next);
@@ -159,10 +160,10 @@ public class ClassService {
                                    boolean mayChange, UUID createdBy) {
         TeamFormation parsedFormation = TeamFormation.parse(formation);
         if (parsedFormation == null) {
-            throw ApiException.badRequest("INVALID_TEAM_FORMATION", "teamFormation must be STUDENT_FORMED or INSTRUCTOR_ASSIGNED");
+            throw ApiException.badRequest(ErrorCode.INVALID_TEAM_FORMATION, "teamFormation must be STUDENT_FORMED or INSTRUCTOR_ASSIGNED");
         }
         if (min < 1 || max < min || max > 50) {
-            throw ApiException.badRequest("INVALID_TEAM_SIZE", "Team sizes must satisfy 1 <= min <= max <= 50");
+            throw ApiException.badRequest(ErrorCode.INVALID_TEAM_SIZE, "Team sizes must satisfy 1 <= min <= max <= 50");
         }
         return new NewClass(year, semester, code, name, section, parsedFormation, min, max, mayChange, createdBy);
     }

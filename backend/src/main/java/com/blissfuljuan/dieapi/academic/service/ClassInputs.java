@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.academic.service;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -22,8 +23,8 @@ final class ClassInputs {
 
     static String required(String value, String field) {
         String v = blankToNull(value);
-        if (v == null) throw ApiException.badRequest("FIELD_REQUIRED", field + " is required");
-        if (v.length() > 100) throw ApiException.badRequest("FIELD_TOO_LONG", field + " is too long");
+        if (v == null) throw ApiException.badRequest(ErrorCode.FIELD_REQUIRED, field + " is required");
+        if (v.length() > 100) throw ApiException.badRequest(ErrorCode.FIELD_TOO_LONG, field + " is too long");
         return v;
     }
 

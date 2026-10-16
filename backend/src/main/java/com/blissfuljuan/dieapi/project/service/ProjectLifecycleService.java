@@ -7,6 +7,7 @@ import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.ProjectKind;
 import com.blissfuljuan.dieapi.project.model.ProjectStatus;
 import com.blissfuljuan.dieapi.project.model.UpdateProject;
@@ -52,7 +53,7 @@ public class ProjectLifecycleService {
                 String teamName = current.teamName();
                 if (req.teamName() != null) {
                     if (current.kind() == ProjectKind.INDIVIDUAL) {
-                        throw ApiException.badRequest("INDIVIDUAL_PROJECT_NO_TEAM_NAME", "An individual project has no team name");
+                        throw ApiException.badRequest(ErrorCode.INDIVIDUAL_PROJECT_NO_TEAM_NAME, "An individual project has no team name");
                     }
                     teamName = text(req.teamName(), "teamName", 100, true);
                 }

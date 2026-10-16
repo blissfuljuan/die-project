@@ -5,7 +5,6 @@ import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.access.model.SqlScope;
 import com.blissfuljuan.dieapi.access.repository.AccessRepository;
 import com.blissfuljuan.dieapi.account.model.UserRole;
-import com.blissfuljuan.dieapi.project.model.TeamRole;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -27,9 +26,7 @@ class StudentAccess implements RoleAccess {
     }
 
     @Override public ProjectRole projectRole(UUID userId, UUID projectId) {
-        return repo.currentTeamRole(projectId, userId)
-            .map(r -> r == TeamRole.REPRESENTATIVE ? ProjectRole.REPRESENTATIVE : ProjectRole.MEMBER)
-            .orElse(ProjectRole.NONE);
+        return repo.currentTeamRole(projectId, userId).orElse(ProjectRole.NONE);
     }
 
     @Override public SqlScope visibleClasses(UUID userId) { return repo.classesOfStudent(userId); }

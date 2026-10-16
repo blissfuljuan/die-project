@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.project.model.rule;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.MembershipPlan;
 import com.blissfuljuan.dieapi.project.model.TeamRole;
 
@@ -19,7 +20,7 @@ public class MembershipReconciler {
     public UUID chooseRepresentative(UUID requested, Map<UUID, TeamRole> current, List<UUID> desired) {
         if (requested != null) {
             if (!desired.contains(requested)) {
-                throw ApiException.badRequest("INVALID_REPRESENTATIVE", "representativeId must be one of memberIds");
+                throw ApiException.badRequest(ErrorCode.INVALID_REPRESENTATIVE, "representativeId must be one of memberIds");
             }
             return requested;
         }

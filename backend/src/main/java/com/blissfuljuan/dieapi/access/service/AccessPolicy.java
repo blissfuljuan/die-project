@@ -5,6 +5,7 @@ import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.access.model.SqlScope;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -87,6 +88,6 @@ public class AccessPolicy {
     }
 
     static ApiException accessDenied() {
-        return ApiException.forbidden("ACCESS_DENIED", "You do not have permission to perform this action.");
+        return ApiException.forbidden(ErrorCode.ACCESS_DENIED, "You do not have permission to perform this action.");
     }
 }

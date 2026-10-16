@@ -4,6 +4,7 @@ import com.blissfuljuan.dieapi.academic.model.TeamFormation;
 import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.ProjectCreation;
 import com.blissfuljuan.dieapi.project.model.ProjectKind;
 import com.blissfuljuan.dieapi.project.model.TeamRole;
@@ -33,12 +34,12 @@ public class StudentTeamCreation implements ProjectCreationStrategy {
     @Override
     public UUID create(ProjectCreation c) {
         if (c.kind() != ProjectKind.TEAM || c.cls().teamFormation() != TeamFormation.STUDENT_FORMED) {
-            throw ApiException.forbidden("STUDENT_PROJECT_NOT_ALLOWED",
+            throw ApiException.forbidden(ErrorCode.STUDENT_PROJECT_NOT_ALLOWED,
                 "Students can only create teams, and only in classes where students form their own teams");
         }
         UUID studentId = c.actor().getId();
         if (repo.activeProjectOf(c.classId(), studentId).isPresent()) {
-            throw ApiException.conflict("ALREADY_IN_PROJECT", "You already belong to a project in this class");
+            throw ApiException.conflict(ErrorCode.ALREADY_IN_PROJECT, "You already belong to a project in this class");
         }
         UUID projectId = repo.insert(c.classId(), c.kind(), c.title(), c.description(), c.teamName(), studentId);
         team.add(projectId, studentId, TeamRole.REPRESENTATIVE, studentId);

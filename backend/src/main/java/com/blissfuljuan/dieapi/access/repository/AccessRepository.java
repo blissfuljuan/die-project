@@ -1,7 +1,7 @@
 package com.blissfuljuan.dieapi.access.repository;
 
 import com.blissfuljuan.dieapi.access.model.SqlScope;
-import com.blissfuljuan.dieapi.project.model.TeamRole;
+import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -51,10 +51,21 @@ public class AccessRepository {
             """, projectId, userId);
     }
 
-    /** The user's current team role in the project, if they are a current member. */
-    public Optional<TeamRole> currentTeamRole(UUID projectId, UUID userId) {
+    /**
+     * The user's current team role in the project as an access role (MEMBER or REPRESENTATIVE), if they are a
+     * current member. Mapped from the stored role name here so that access does not depend on the project module.
+     */
+    public Optional<ProjectRole> currentTeamRole(UUID projectId, UUID userId) {
         return jdbc.sql("SELECT role FROM project_member WHERE project_id = :c AND user_id = :u AND left_at IS NULL")
-            .param("c", projectId).param("u", userId).query(String.class).optional().map(TeamRole::valueOf);
+            .param("c", projectId).param("u", userId).query(String.class).optional().map(AccessRepository::teamRoleToProjectRole);
+    }
+
+    private static ProjectRole teamRoleToProjectRole(String stored) {
+        return switch (stored) {
+            case "REPRESENTATIVE" -> ProjectRole.REPRESENTATIVE;
+            case "MEMBER" -> ProjectRole.MEMBER;
+            default -> throw new IllegalArgumentException("Unknown team role " + stored);
+        };
     }
 
     // ---- list scopes (class listings use alias c, project listings alias p) ----

@@ -8,6 +8,7 @@ import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.MemberRow;
 import com.blissfuljuan.dieapi.project.model.MembershipPlan;
 import com.blissfuljuan.dieapi.project.model.ProjectKind;
@@ -66,11 +67,11 @@ public class ProjectMembershipService {
                 List<UUID> desired = distinct(req.memberIds());
                 if (individual) {
                     if (desired.size() != 1) {
-                        throw ApiException.badRequest("INDIVIDUAL_PROJECT_ONE_STUDENT", "An individual project has exactly one student");
+                        throw ApiException.badRequest(ErrorCode.INDIVIDUAL_PROJECT_ONE_STUDENT, "An individual project has exactly one student");
                     }
                 } else {
                     if (desired.isEmpty()) {
-                        throw ApiException.badRequest("MEMBERS_REQUIRED", "memberIds must list at least one student");
+                        throw ApiException.badRequest(ErrorCode.MEMBERS_REQUIRED, "memberIds must list at least one student");
                     }
                     checkTeamSize(locked.cls(), desired.size(), exception);
                 }
@@ -107,11 +108,11 @@ public class ProjectMembershipService {
         return mutation.run(projectId, Requires.ACTIVE_PROJECT, () -> policy.requireProjectEdit(user, projectId),
             null, (locked, role) -> {
                 if (locked.project().kind() == ProjectKind.INDIVIDUAL) {
-                    throw ApiException.conflict("INDIVIDUAL_PROJECT_NO_REPRESENTATIVE", "An individual project has no representative");
+                    throw ApiException.conflict(ErrorCode.INDIVIDUAL_PROJECT_NO_REPRESENTATIVE, "An individual project has no representative");
                 }
                 List<MemberRow> members = repo.currentMembers(projectId);
                 if (members.stream().noneMatch(m -> m.userId().equals(studentId))) {
-                    throw ApiException.badRequest("INVALID_REPRESENTATIVE", "The new representative must be a current member of the team");
+                    throw ApiException.badRequest(ErrorCode.INVALID_REPRESENTATIVE, "The new representative must be a current member of the team");
                 }
                 MemberRow old = members.stream().filter(m -> m.role() == TeamRole.REPRESENTATIVE).findFirst().orElse(null);
                 if (old == null || !old.userId().equals(studentId)) {
@@ -131,15 +132,15 @@ public class ProjectMembershipService {
         mutation.run(projectId, Requires.ACTIVE_PROJECT, () -> {
             ProjectRole role = policy.requireProjectView(user, projectId); // also re-checked under the locks: a concurrent removal must not produce a bogus "left" event
             if (role == ProjectRole.STAFF) {
-                throw ApiException.forbidden("STAFF_MANAGE_MEMBERSHIP", "Staff manage membership with PUT /members");
+                throw ApiException.forbidden(ErrorCode.STAFF_MANAGE_MEMBERSHIP, "Staff manage membership with PUT /members");
             }
             return role;
         }, null, (locked, role) -> {
             if (locked.project().kind() != ProjectKind.TEAM) {
-                throw ApiException.conflict("INDIVIDUAL_PROJECT_CANNOT_BE_LEFT", "Individual projects cannot be left; ask your instructor");
+                throw ApiException.conflict(ErrorCode.INDIVIDUAL_PROJECT_CANNOT_BE_LEFT, "Individual projects cannot be left; ask your instructor");
             }
             if (!locked.cls().studentsMayChangeTeams()) {
-                throw ApiException.forbidden("TEAM_CHANGES_NOT_ALLOWED", "Your instructor does not allow students to change teams");
+                throw ApiException.forbidden(ErrorCode.TEAM_CHANGES_NOT_ALLOWED, "Your instructor does not allow students to change teams");
             }
             team.remove(projectId, user.getId(), user.getId(), "left team");
             events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_MEMBER_LEFT, AuditResource.PROJECT, projectId.toString(), Map.of()));

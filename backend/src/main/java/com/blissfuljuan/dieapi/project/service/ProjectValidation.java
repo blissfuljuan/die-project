@@ -6,6 +6,7 @@ import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
 import com.blissfuljuan.dieapi.account.model.AccountStatus;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.ProjectRow;
 import com.blissfuljuan.dieapi.project.repository.ProjectRepository;
 import org.springframework.stereotype.Component;
@@ -35,33 +36,33 @@ public class ProjectValidation {
         var student = classes.findStudentById(studentId);
         if (enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED || student.isEmpty()
             || student.get().role() != UserRole.STUDENT || student.get().status() == AccountStatus.DEACTIVATED) {
-            throw ApiException.badRequest("STUDENT_NOT_ELIGIBLE", "Student " + studentId + " is not an active, enrolled student of this class");
+            throw ApiException.badRequest(ErrorCode.STUDENT_NOT_ELIGIBLE, "Student " + studentId + " is not an active, enrolled student of this class");
         }
         var other = repo.activeProjectOf(classId, studentId);
         if (other.isPresent() && !other.get().equals(exceptProject)) {
-            throw ApiException.conflict("STUDENT_IN_OTHER_PROJECT", "Student " + studentId + " already belongs to another project in this class");
+            throw ApiException.conflict(ErrorCode.STUDENT_IN_OTHER_PROJECT, "Student " + studentId + " already belongs to another project in this class");
         }
     }
 
     public static void checkTeamSize(LockedClass cls, int size, boolean exception) {
         if (exception) {
             if (size < 1 || size > HARD_MAX_TEAM) {
-                throw ApiException.badRequest("INVALID_TEAM_SIZE", "Team size must be between 1 and " + HARD_MAX_TEAM);
+                throw ApiException.badRequest(ErrorCode.INVALID_TEAM_SIZE, "Team size must be between 1 and " + HARD_MAX_TEAM);
             }
         } else if (size < cls.teamMinSize() || size > cls.teamMaxSize()) {
-            throw ApiException.badRequest("INVALID_TEAM_SIZE", "Team size must be between " + cls.teamMinSize() + " and " + cls.teamMaxSize()
+            throw ApiException.badRequest(ErrorCode.INVALID_TEAM_SIZE, "Team size must be between " + cls.teamMinSize() + " and " + cls.teamMaxSize()
                 + " (set allowSizeException to override)");
         }
     }
 
     public static void checkVersion(ProjectRow p, long version) {
         if (p.version() != version) {
-            throw ApiException.conflict("PROJECT_VERSION_CONFLICT", "The project was modified by someone else; reload and retry");
+            throw ApiException.conflict(ErrorCode.PROJECT_VERSION_CONFLICT, "The project was modified by someone else; reload and retry");
         }
     }
 
     public static void requireVersion(Long version) {
-        if (version == null) throw ApiException.badRequest("VERSION_REQUIRED", "version is required");
+        if (version == null) throw ApiException.badRequest(ErrorCode.VERSION_REQUIRED, "version is required");
     }
 
     public static List<UUID> distinct(List<UUID> ids) {
@@ -71,10 +72,10 @@ public class ProjectValidation {
     public static String text(String value, String field, int max, boolean required) {
         String v = value == null || value.isBlank() ? null : value.trim();
         if (v == null) {
-            if (required) throw ApiException.badRequest("FIELD_REQUIRED", field + " is required");
+            if (required) throw ApiException.badRequest(ErrorCode.FIELD_REQUIRED, field + " is required");
             return null;
         }
-        if (v.length() > max) throw ApiException.badRequest("FIELD_TOO_LONG", field + " is too long (max " + max + ")");
+        if (v.length() > max) throw ApiException.badRequest(ErrorCode.FIELD_TOO_LONG, field + " is too long (max " + max + ")");
         return v;
     }
 }

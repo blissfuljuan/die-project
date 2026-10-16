@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.common.controller;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.common.util.ProblemDetails;
 import com.blissfuljuan.dieapi.common.view.FieldErrorView;
 import tools.jackson.core.JacksonException;
@@ -84,7 +85,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex, HttpHeaders headers,
                                                                   HttpStatusCode status, WebRequest request) {
-        ProblemDetail problem = problem(status, "VALIDATION_FAILED",
+        ProblemDetail problem = problem(status, ErrorCode.VALIDATION_FAILED,
             "Some fields are missing or invalid. Fix the fields listed in 'errors' and try again.");
         problem.setProperty("errors", fieldErrors(ex.getBindingResult()));
         return handleExceptionInternal(ex, problem, headers, status, request);
@@ -100,7 +101,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             result.getResolvableErrors().forEach(error ->
                 errors.add(new FieldErrorView(name == null ? "parameter" : name, error.getDefaultMessage())));
         });
-        ProblemDetail problem = problem(status, "VALIDATION_FAILED",
+        ProblemDetail problem = problem(status, ErrorCode.VALIDATION_FAILED,
             "Some parameters are missing or invalid. Fix the items listed in 'errors' and try again.");
         problem.setProperty("errors", errors);
         return handleExceptionInternal(ex, problem, headers, status, request);
@@ -117,14 +118,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 detail = "The value of field '" + field + "' has the wrong type or format.";
             }
         }
-        return handleExceptionInternal(ex, problem(status, "MALFORMED_REQUEST", detail), headers, status, request);
+        return handleExceptionInternal(ex, problem(status, ErrorCode.MALFORMED_REQUEST, detail), headers, status, request);
     }
 
     @Override
     protected ResponseEntity<Object> handleMissingServletRequestParameter(MissingServletRequestParameterException ex,
                                                                           HttpHeaders headers, HttpStatusCode status,
                                                                           WebRequest request) {
-        ProblemDetail problem = problem(status, "MISSING_PARAMETER",
+        ProblemDetail problem = problem(status, ErrorCode.MISSING_PARAMETER,
             "The required parameter '" + ex.getParameterName() + "' is missing.");
         return handleExceptionInternal(ex, problem, headers, status, request);
     }
@@ -133,7 +134,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     protected ResponseEntity<Object> handleMissingServletRequestPart(MissingServletRequestPartException ex,
                                                                      HttpHeaders headers, HttpStatusCode status,
                                                                      WebRequest request) {
-        ProblemDetail problem = problem(status, "MISSING_PART",
+        ProblemDetail problem = problem(status, ErrorCode.MISSING_PART,
             "The multipart form field '" + ex.getRequestPartName() + "' is required (attach the file).");
         return handleExceptionInternal(ex, problem, headers, status, request);
     }
@@ -145,7 +146,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         if (ex instanceof MethodArgumentTypeMismatchException mismatch) {
             detail = "Parameter '" + mismatch.getName() + "' must be " + expected(mismatch.getRequiredType()) + ".";
         }
-        return handleExceptionInternal(ex, problem(status, "INVALID_PARAMETER", detail), headers, status, request);
+        return handleExceptionInternal(ex, problem(status, ErrorCode.INVALID_PARAMETER, detail), headers, status, request);
     }
 
     @Override
@@ -156,7 +157,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             .map(Object::toString).collect(Collectors.joining(", "));
         String detail = "The " + ex.getMethod() + " method is not supported for this endpoint."
             + (allowed.isEmpty() ? "" : " Use one of: " + allowed + ".");
-        return handleExceptionInternal(ex, problem(status, "METHOD_NOT_ALLOWED", detail), headers, status, request);
+        return handleExceptionInternal(ex, problem(status, ErrorCode.METHOD_NOT_ALLOWED, detail), headers, status, request);
     }
 
     @Override
@@ -167,14 +168,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         String sent = ex.getContentType() == null ? "none" : ex.getContentType().toString();
         String detail = "The content type '" + sent + "' is not supported here."
             + (supported.isEmpty() ? "" : " Send one of: " + supported + ".");
-        return handleExceptionInternal(ex, problem(status, "UNSUPPORTED_MEDIA_TYPE", detail), headers, status, request);
+        return handleExceptionInternal(ex, problem(status, ErrorCode.UNSUPPORTED_MEDIA_TYPE, detail), headers, status, request);
     }
 
     @Override
     protected ResponseEntity<Object> handleHttpMediaTypeNotAcceptable(HttpMediaTypeNotAcceptableException ex,
                                                                       HttpHeaders headers, HttpStatusCode status,
                                                                       WebRequest request) {
-        ProblemDetail problem = problem(status, "NOT_ACCEPTABLE",
+        ProblemDetail problem = problem(status, ErrorCode.NOT_ACCEPTABLE,
             "This endpoint cannot produce any of the content types you asked for (Accept header). Ask for application/json.");
         return handleExceptionInternal(ex, problem, headers, status, request);
     }
@@ -182,7 +183,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @Override
     protected ResponseEntity<Object> handleNoResourceFoundException(NoResourceFoundException ex, HttpHeaders headers,
                                                                     HttpStatusCode status, WebRequest request) {
-        ProblemDetail problem = problem(status, "ENDPOINT_NOT_FOUND",
+        ProblemDetail problem = problem(status, ErrorCode.ENDPOINT_NOT_FOUND,
             "There is no endpoint at '" + ex.getHttpMethod() + " /" + ex.getResourcePath() + "'. Check the URL and the HTTP method.");
         return handleExceptionInternal(ex, problem, headers, status, request);
     }
@@ -193,7 +194,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                                                                           WebRequest request) {
         long max = ex.getMaxUploadSize();
         String limit = max > 0 ? " The limit is " + Math.max(1, max / (1024 * 1024)) + " MB." : "";
-        return handleExceptionInternal(ex, problem(status, "PAYLOAD_TOO_LARGE", "The uploaded file is too large." + limit),
+        return handleExceptionInternal(ex, problem(status, ErrorCode.PAYLOAD_TOO_LARGE, "The uploaded file is too large." + limit),
             headers, status, request);
     }
 
@@ -201,14 +202,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Object> handleAccessDenied(AccessDeniedException ex, WebRequest request) {
-        ProblemDetail problem = ProblemDetails.of(HttpStatus.FORBIDDEN, "ACCESS_DENIED",
+        ProblemDetail problem = ProblemDetails.of(HttpStatus.FORBIDDEN, ErrorCode.ACCESS_DENIED,
             "You do not have permission to perform this action.");
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.FORBIDDEN, request);
     }
 
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<Object> handleAuthentication(AuthenticationException ex, WebRequest request) {
-        ProblemDetail problem = ProblemDetails.of(HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
+        ProblemDetail problem = ProblemDetails.of(HttpStatus.UNAUTHORIZED, ErrorCode.AUTHENTICATION_REQUIRED,
             "Authentication is required. Sign in and try again.");
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.UNAUTHORIZED, request);
     }
@@ -220,7 +221,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             String path = violation.getPropertyPath().toString();
             errors.add(new FieldErrorView(path.substring(path.lastIndexOf('.') + 1), violation.getMessage()));
         }
-        ProblemDetail problem = ProblemDetails.of(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+        ProblemDetail problem = ProblemDetails.of(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_FAILED,
             "Some values are invalid. Fix the items listed in 'errors' and try again.");
         problem.setProperty("errors", errors);
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.BAD_REQUEST, request);
@@ -229,7 +230,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(DuplicateKeyException.class)
     public ResponseEntity<Object> handleDuplicate(DuplicateKeyException ex, WebRequest request) {
         log.debug("Unique constraint violated", ex);
-        ProblemDetail problem = ProblemDetails.of(HttpStatus.CONFLICT, "ALREADY_EXISTS",
+        ProblemDetail problem = ProblemDetails.of(HttpStatus.CONFLICT, ErrorCode.ALREADY_EXISTS,
             "A record with the same unique value (for example an email address or Student ID) already exists.");
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.CONFLICT, request);
     }
@@ -237,7 +238,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Object> handleIntegrity(DataIntegrityViolationException ex, WebRequest request) {
         log.warn("Data integrity violation (traceId={})", MDC.get(ProblemDetails.REQUEST_ID_KEY), ex);
-        ProblemDetail problem = ProblemDetails.of(HttpStatus.CONFLICT, "DATA_CONFLICT",
+        ProblemDetail problem = ProblemDetails.of(HttpStatus.CONFLICT, ErrorCode.DATA_CONFLICT,
             "The request conflicts with existing data and could not be saved. Reload and try again.");
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.CONFLICT, request);
     }
@@ -245,7 +246,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler({DataAccessResourceFailureException.class, CannotCreateTransactionException.class})
     public ResponseEntity<Object> handleDatabaseUnavailable(Exception ex, WebRequest request) {
         log.error("Database unavailable (traceId={})", MDC.get(ProblemDetails.REQUEST_ID_KEY), ex);
-        ProblemDetail problem = ProblemDetails.of(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE",
+        ProblemDetail problem = ProblemDetails.of(HttpStatus.SERVICE_UNAVAILABLE, ErrorCode.SERVICE_UNAVAILABLE,
             "The service is temporarily unavailable. Try again in a moment.");
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.SERVICE_UNAVAILABLE, request);
     }
@@ -258,14 +259,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             ? servlet.getHttpMethod() + " " + servlet.getRequest().getRequestURI() : "request";
         log.error("Unhandled exception (traceId={}) for {}", traceId, where, ex);
         String reference = traceId == null ? "" : " Quote reference " + traceId + " if you contact support.";
-        ProblemDetail problem = ProblemDetails.of(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR",
+        ProblemDetail problem = ProblemDetails.of(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCode.INTERNAL_ERROR,
             "Something went wrong on our side." + reference);
         return handleExceptionInternal(ex, problem, new HttpHeaders(), HttpStatus.INTERNAL_SERVER_ERROR, request);
     }
 
     // ================= helpers =================
 
-    private static ProblemDetail problem(HttpStatusCode status, String code, String detail) {
+    private static ProblemDetail problem(HttpStatusCode status, ErrorCode code, String detail) {
         HttpStatus http = HttpStatus.resolve(status.value());
         return ProblemDetails.of(http == null ? HttpStatus.BAD_REQUEST : http, code, detail);
     }

@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.roster.service;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -34,12 +35,12 @@ public class CommitLimiter {
 
     public Permit acquire(UUID userId) {
         if (!running.add(userId)) {
-            throw ApiException.tooManyRequests("COMMIT_ALREADY_RUNNING",
+            throw ApiException.tooManyRequests(ErrorCode.COMMIT_ALREADY_RUNNING,
                 "A roster commit of yours is already running; wait for it to finish");
         }
         if (!global.tryAcquire()) {
             running.remove(userId);
-            throw ApiException.tooManyRequests("SERVER_BUSY",
+            throw ApiException.tooManyRequests(ErrorCode.SERVER_BUSY,
                 "The server is busy committing other rosters; try again in a moment");
         }
         return () -> {
