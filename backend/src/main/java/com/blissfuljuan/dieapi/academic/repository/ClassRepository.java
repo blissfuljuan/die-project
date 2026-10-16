@@ -1,8 +1,13 @@
 package com.blissfuljuan.dieapi.academic.repository;
 
+import com.blissfuljuan.dieapi.academic.model.ClassStatus;
+import com.blissfuljuan.dieapi.academic.model.EnrollmentStatus;
 import com.blissfuljuan.dieapi.academic.model.LockedClass;
 import com.blissfuljuan.dieapi.academic.model.NewClass;
 import com.blissfuljuan.dieapi.academic.model.StudentRef;
+import com.blissfuljuan.dieapi.academic.model.TeamFormation;
+import com.blissfuljuan.dieapi.account.model.AccountStatus;
+import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.academic.view.ClassPage;
 import com.blissfuljuan.dieapi.academic.view.ClassView;
 import com.blissfuljuan.dieapi.academic.view.ClassView.InstructorRef;
@@ -42,10 +47,10 @@ public class ClassRepository {
 
     // ---- classes ----
 
-    public ClassPage search(SqlScope scope, String status, String q, int page, int size) {
+    public ClassPage search(SqlScope scope, ClassStatus status, String q, int page, int size) {
         StringBuilder where = new StringBuilder(" WHERE 1 = 1");
         Map<String, Object> params = new HashMap<>(scope.params());
-        if (status != null) { where.append(" AND c.status = :status"); params.put("status", status); }
+        if (status != null) { where.append(" AND c.status = :status"); params.put("status", status.name()); }
         if (q != null && !q.isBlank()) {
             String escaped = q.trim().toLowerCase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
             where.append("""
@@ -84,10 +89,10 @@ public class ClassRepository {
                        team_formation, team_min_size, team_max_size, students_may_change_teams
                 FROM academic_class WHERE id = :id""" + (forUpdate ? " FOR UPDATE" : ""))
             .param("id", id)
-            .query((rs, n) -> new LockedClass(rs.getObject("id", UUID.class), rs.getString("status"),
+            .query((rs, n) -> new LockedClass(rs.getObject("id", UUID.class), ClassStatus.valueOf(rs.getString("status")),
                 rs.getLong("version"), rs.getString("academic_year"), rs.getString("semester"),
                 rs.getString("subject_code"), rs.getString("subject_name"), rs.getString("section"),
-                rs.getString("team_formation"), rs.getInt("team_min_size"), rs.getInt("team_max_size"),
+                TeamFormation.valueOf(rs.getString("team_formation")), rs.getInt("team_min_size"), rs.getInt("team_max_size"),
                 rs.getBoolean("students_may_change_teams")))
             .optional();
     }
@@ -99,7 +104,7 @@ public class ClassRepository {
                 VALUES (:y, :sem, :code, :name, :sec, :tf, :min, :max, :chg, :by) RETURNING id
                 """)
             .param("y", c.academicYear()).param("sem", c.semester()).param("code", c.subjectCode())
-            .param("name", c.subjectName()).param("sec", c.section()).param("tf", c.teamFormation())
+            .param("name", c.subjectName()).param("sec", c.section()).param("tf", c.teamFormation().name())
             .param("min", c.teamMinSize()).param("max", c.teamMaxSize())
             .param("chg", c.studentsMayChangeTeams()).param("by", c.createdBy())
             .query(UUID.class).single();
@@ -115,14 +120,14 @@ public class ClassRepository {
                 """)
             .param("id", id).param("y", c.academicYear()).param("sem", c.semester())
             .param("code", c.subjectCode()).param("name", c.subjectName()).param("sec", c.section())
-            .param("tf", c.teamFormation()).param("min", c.teamMinSize()).param("max", c.teamMaxSize())
+            .param("tf", c.teamFormation().name()).param("min", c.teamMinSize()).param("max", c.teamMaxSize())
             .param("chg", c.studentsMayChangeTeams())
             .update();
     }
 
-    public void setStatus(UUID id, String status) {
+    public void setStatus(UUID id, ClassStatus status) {
         jdbc.sql("UPDATE academic_class SET status = :s, updated_at = now(), version = version + 1 WHERE id = :id")
-            .param("id", id).param("s", status).update();
+            .param("id", id).param("s", status.name()).update();
     }
 
     // ---- instructors ----
@@ -199,7 +204,8 @@ public class ClassRepository {
     }
 
     private static StudentRef mapStudent(ResultSet rs, int n) throws SQLException {
-        return new StudentRef(rs.getObject("id", UUID.class), rs.getString("role"), rs.getString("status"),
+        return new StudentRef(rs.getObject("id", UUID.class), UserRole.valueOf(rs.getString("role")),
+            AccountStatus.valueOf(rs.getString("status")),
             rs.getString("last_name"), rs.getObject("created_by", UUID.class));
     }
 
@@ -213,9 +219,9 @@ public class ClassRepository {
     }
 
     /** @return current enrollment status for the pair, if a row exists. */
-    public Optional<String> enrollmentStatus(UUID classId, UUID studentId) {
+    public Optional<EnrollmentStatus> enrollmentStatus(UUID classId, UUID studentId) {
         return jdbc.sql("SELECT status FROM enrollment WHERE class_id = :c AND student_id = :s FOR UPDATE")
-            .param("c", classId).param("s", studentId).query(String.class).optional();
+            .param("c", classId).param("s", studentId).query(String.class).optional().map(EnrollmentStatus::valueOf);
     }
 
     public void insertEnrollment(UUID classId, UUID studentId, String program, String section) {

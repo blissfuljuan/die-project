@@ -1,19 +1,21 @@
 package com.blissfuljuan.dieapi.auth.service;
 
+import com.blissfuljuan.dieapi.account.model.AccountStatus;
 import com.blissfuljuan.dieapi.account.service.TempCredentialService;
-import com.blissfuljuan.dieapi.audit.service.AuditService;
+import com.blissfuljuan.dieapi.audit.model.AuditAction;
+import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.view.ActivationCheckView;
 import com.blissfuljuan.dieapi.auth.view.ActivationStatusView;
 import com.blissfuljuan.dieapi.common.util.AfterCommit;
 import com.blissfuljuan.dieapi.common.util.Tokens;
 import com.blissfuljuan.dieapi.mail.service.EmailSender;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
+import com.blissfuljuan.dieapi.common.exception.ApiException;
 
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -22,7 +24,7 @@ import java.util.*;
  * Account activation (brief 3.1): identifier + temporary credential -> email + new password ->
  * email verification -> ACTIVE (temporary credential invalidated at that point).
  *
- * Failure paths throw ResponseStatusException; these methods use noRollbackFor so that failed-attempt
+ * Failure paths throw ApiException; these methods use noRollbackFor so that failed-attempt
  * counters and lockouts are committed even though the request is rejected.
  */
 @Service
@@ -40,7 +42,7 @@ public class ActivationService {
     private final LoginThrottleService throttle;
     private final TempCredentialService tempCredentials;
     private final EmailSender mail;
-    private final AuditService audit;
+    private final ApplicationEventPublisher events;
     private final int maxCredentialAttempts;
     private final int verificationHours;
     private final String frontendBaseUrl;
@@ -48,7 +50,7 @@ public class ActivationService {
 
     public ActivationService(JdbcClient jdbc, PasswordEncoder encoder, PasswordPolicy passwordPolicy,
                              LoginThrottleService throttle, TempCredentialService tempCredentials,
-                             EmailSender mail, AuditService audit,
+                             EmailSender mail, ApplicationEventPublisher events,
                              @Value("${die.auth.temp-credential-max-attempts:5}") int maxCredentialAttempts,
                              @Value("${die.auth.email-verification-hours:24}") int verificationHours,
                              @Value("${die.frontend-base-url:http://localhost:5173}") String frontendBaseUrl) {
@@ -58,7 +60,7 @@ public class ActivationService {
         this.throttle = throttle;
         this.tempCredentials = tempCredentials;
         this.mail = mail;
-        this.audit = audit;
+        this.events = events;
         this.maxCredentialAttempts = maxCredentialAttempts;
         this.verificationHours = verificationHours;
         this.frontendBaseUrl = frontendBaseUrl.replaceAll("/+$", "");
@@ -67,14 +69,14 @@ public class ActivationService {
     }
 
     /** Step 4: sign in with identifier + temporary credential. Changes nothing except failure counters. */
-    @Transactional(noRollbackFor = ResponseStatusException.class)
+    @Transactional(noRollbackFor = ApiException.class)
     public ActivationCheckView check(String identifier, String temporaryCredential, String clientIp) {
         Pending p = authenticate(identifier, temporaryCredential, clientIp);
         return new ActivationCheckView(p.firstName(), p.lastName(), p.email(), p.emailVerified());
     }
 
     /** Steps 5-6: set email + new password. Verification email is sent unless the same verified email is kept. */
-    @Transactional(noRollbackFor = ResponseStatusException.class)
+    @Transactional(noRollbackFor = ApiException.class)
     public ActivationStatusView begin(String identifier, String temporaryCredential, String rawEmail,
                              String newPassword, String clientIp) {
         Pending p = authenticate(identifier, temporaryCredential, clientIp);
@@ -113,8 +115,8 @@ public class ActivationService {
 
         if (keepVerified) {
             tempCredentials.invalidateActive(p.userId(), "ACTIVATED");
-            audit.record(p.userId(), "ACCOUNT_ACTIVATED", "user", p.userId().toString(), emailDetails);
-            return new ActivationStatusView("ACTIVE");
+            events.publishEvent(AuditEvent.of(p.userId(), AuditAction.ACCOUNT_ACTIVATED, "user", p.userId().toString(), emailDetails));
+            return new ActivationStatusView(AccountStatus.ACTIVE.name());
         }
 
         String token = newToken();
@@ -124,7 +126,7 @@ public class ActivationService {
                 """)
             .param("u", p.userId()).param("email", email).param("h", sha256(token))
             .param("hours", verificationHours).update();
-        audit.record(p.userId(), "ACTIVATION_STARTED", "user", p.userId().toString(), emailDetails);
+        events.publishEvent(AuditEvent.of(p.userId(), AuditAction.ACTIVATION_STARTED, "user", p.userId().toString(), emailDetails));
 
         String link = frontendBaseUrl + "/verify-email?token=" + token;
         String body = "Hello " + p.firstName() + ",\n\nConfirm your email address to finish activating your "
@@ -153,14 +155,14 @@ public class ActivationService {
                 "status", rs.getString("status"),
                 "hasPassword", rs.getBoolean("has_password")))
             .optional()
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, INVALID_LINK));
+            .orElseThrow(() -> ApiException.badRequest("VERIFICATION_LINK_INVALID", INVALID_LINK));
 
         UUID userId = (UUID) row.get("userId");
         boolean consistent = row.get("tokenEmail").equals(row.get("userEmail"))
-            && "PENDING_ACTIVATION".equals(row.get("status"))
+            && AccountStatus.PENDING_ACTIVATION.name().equals(row.get("status"))
             && (boolean) row.get("hasPassword");
         if (!consistent) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, INVALID_LINK);
+            throw ApiException.badRequest("VERIFICATION_LINK_INVALID", INVALID_LINK);
         }
         jdbc.sql("UPDATE email_verification_token SET consumed_at = now() WHERE id = :id")
             .param("id", row.get("tokenId")).update();
@@ -171,9 +173,9 @@ public class ActivationService {
                 """)
             .param("id", userId).update();
         tempCredentials.invalidateActive(userId, "ACTIVATED");
-        audit.record(userId, "ACCOUNT_ACTIVATED", "user", userId.toString(),
-            Map.of("emailVerified", true, "email", String.valueOf(row.get("userEmail"))));
-        return new ActivationStatusView("ACTIVE");
+        events.publishEvent(AuditEvent.of(userId, AuditAction.ACCOUNT_ACTIVATED, "user", userId.toString(),
+            Map.of("emailVerified", true, "email", String.valueOf(row.get("userEmail")))));
+        return new ActivationStatusView(AccountStatus.ACTIVE.name());
     }
 
     // ---- internals ----
@@ -194,14 +196,14 @@ public class ActivationService {
         if (found.isEmpty() || !matches) {
             found.ifPresent(p -> recordCredentialFailure(p));
             throttle.record(throttleKey, clientIp, false);
-            audit.record(found.map(Pending::userId).orElse(null), "ACTIVATION_FAILED", "auth", null, Map.of());
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, INVALID);
+            events.publishEvent(AuditEvent.of(found.map(Pending::userId).orElse(null), AuditAction.ACTIVATION_FAILED, "auth", null, Map.of()));
+            throw ApiException.unauthorized("ACTIVATION_CREDENTIALS_INVALID", INVALID);
         }
         Pending p = found.get();
         if (p.expiresAt().isBefore(OffsetDateTime.now())) {
             tempCredentials.invalidateActive(p.userId(), "EXPIRED");
             throttle.record(throttleKey, clientIp, false);
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, INVALID);
+            throw ApiException.unauthorized("ACTIVATION_CREDENTIALS_INVALID", INVALID);
         }
         return p;
     }
@@ -231,7 +233,7 @@ public class ActivationService {
             .param("id", p.credentialId()).query(Integer.class).single();
         if (attempts >= maxCredentialAttempts) {
             tempCredentials.invalidateActive(p.userId(), "LOCKED");
-            audit.record(p.userId(), "TEMP_CREDENTIAL_LOCKED", "user", p.userId().toString(), Map.of());
+            events.publishEvent(AuditEvent.of(p.userId(), AuditAction.TEMP_CREDENTIAL_LOCKED, "user", p.userId().toString(), Map.of()));
         }
     }
 

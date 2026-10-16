@@ -1,31 +1,31 @@
 package com.blissfuljuan.dieapi.roster.service;
 
 import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
-import com.blissfuljuan.dieapi.academic.service.EnrollmentRules;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.account.service.CredentialHasher;
 import com.blissfuljuan.dieapi.account.service.TempCredentialService;
-import com.blissfuljuan.dieapi.audit.service.AuditService;
+import com.blissfuljuan.dieapi.audit.model.AuditAction;
+import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import org.springframework.context.ApplicationEventPublisher;
+import com.blissfuljuan.dieapi.academic.model.ClassStatus;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
 import com.blissfuljuan.dieapi.common.util.Tokens;
 import com.blissfuljuan.dieapi.roster.model.*;
 import com.blissfuljuan.dieapi.roster.repository.RosterImportRepository;
-import com.blissfuljuan.dieapi.roster.view.*;
+import com.blissfuljuan.dieapi.roster.model.rule.ConflictResolvers;
+import com.blissfuljuan.dieapi.roster.view.CommitResult;
+import com.blissfuljuan.dieapi.roster.view.ImportView;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
-
-import static com.blissfuljuan.dieapi.roster.model.RosterRules.*;
 
 /**
  * Roster import: upload -> preview -> resolve conflicts -> commit.
@@ -39,37 +39,37 @@ import static com.blissfuljuan.dieapi.roster.model.RosterRules.*;
 @Service
 public class RosterImportService {
 
-    private static final Set<String> ACTIONS = Set.of(CREATE, MATCH, SKIP_DUPLICATE, CONFLICT, INVALID);
-
     private final RosterImportRepository repo;
+    private final RosterImportQueryService queries;
     private final RosterParser parser;
     private final RosterAnalyzer analyzer;
+    private final RosterCommitApplier applier;
+    private final ConflictResolvers resolvers;
     private final AccessPolicy policy;
     private final ClassRepository classes;
-    private final EnrollmentRules enrollmentRules;
-    private final TempCredentialService tempCredentials;
-    private final AuditService audit;
+    private final ApplicationEventPublisher events;
     private final ObjectMapper mapper;
     private final CommitLimiter limiter;
     private final CredentialHasher hasher;
     private final PlatformTransactionManager txManager;
 
-    public RosterImportService(RosterImportRepository repo, RosterParser parser, RosterAnalyzer analyzer,
-                               AccessPolicy policy, ClassRepository classes, EnrollmentRules enrollmentRules,
-                               TempCredentialService tempCredentials, AuditService audit, ObjectMapper mapper,
+    public RosterImportService(RosterImportRepository repo, RosterImportQueryService queries, RosterParser parser,
+                               RosterAnalyzer analyzer, RosterCommitApplier applier, ConflictResolvers resolvers,
+                               AccessPolicy policy, ClassRepository classes, ApplicationEventPublisher events, ObjectMapper mapper,
                                CommitLimiter limiter, CredentialHasher hasher, PlatformTransactionManager txManager) {
+        this.repo = repo;
+        this.queries = queries;
+        this.parser = parser;
+        this.analyzer = analyzer;
+        this.applier = applier;
+        this.resolvers = resolvers;
+        this.policy = policy;
+        this.classes = classes;
+        this.events = events;
+        this.mapper = mapper;
         this.limiter = limiter;
         this.hasher = hasher;
         this.txManager = txManager;
-        this.repo = repo;
-        this.parser = parser;
-        this.analyzer = analyzer;
-        this.policy = policy;
-        this.classes = classes;
-        this.enrollmentRules = enrollmentRules;
-        this.tempCredentials = tempCredentials;
-        this.audit = audit;
-        this.mapper = mapper;
     }
 
     // ---- upload / preview ----
@@ -80,57 +80,41 @@ public class RosterImportService {
 
         // Parse (CPU/memory heavy, no database) before taking the class lock, so a slow or hostile file
         // cannot block enrollment and team changes for the whole class.
-        String fileName = cleanFileName(rawFileName);
+        String fileName = RosterParser.cleanFileName(rawFileName);
         List<NormalizedRow> parsed = parser.parse(fileName, bytes);
         assertWritable(classId);
         List<StoredRow> analyzed = analyzer.classify(classId, parsed, user);
 
         UUID id = repo.insertImport(classId, user.getId(), fileName, Tokens.sha256(bytes));
         analyzed.forEach(r -> repo.insertRow(id, r));
-        audit.record(user.getId(), "ROSTER_IMPORT_PREVIEWED", "class", classId.toString(),
-            Map.of("importId", id.toString(), "rows", analyzed.size()));
-        return view(repo.find(id, false).orElseThrow());
-    }
-
-    @Transactional(readOnly = true)
-    public List<ImportView> list(AppUserDetails user, UUID classId) {
-        policy.requireClassManage(user, classId);
-        return repo.listForClass(classId).stream().map(this::view).toList();
-    }
-
-    @Transactional(readOnly = true)
-    public ImportDetail detail(AppUserDetails user, UUID importId, String action, int page, int size) {
-        ImportHeader h = header(user, importId, false);
-        if (action != null && !ACTIONS.contains(action)) {
-            throw bad("action must be one of " + ACTIONS);
-        }
-        int safePage = Math.max(page, 0);
-        int safeSize = Math.min(Math.max(size, 1), 500);
-        List<RowView> rows = repo.rows(importId, action, safePage, safeSize).stream().map(RosterImportService::rowView).toList();
-        return new ImportDetail(view(h), rows, safePage, safeSize, repo.countRows(importId, action));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_PREVIEWED, "class", classId.toString(),
+            Map.of("importId", id.toString(), "rows", analyzed.size())));
+        return queries.view(repo.find(id, false).orElseThrow());
     }
 
     // ---- conflict resolution ----
 
     @Transactional
     public ImportView resolve(AppUserDetails user, UUID importId, List<ResolutionChange> changes) {
-        ImportHeader h = header(user, importId, true);
+        ImportHeader h = queries.header(user, importId, true);
         requirePreview(h);
-        if (changes == null || changes.isEmpty()) throw bad("resolutions must not be empty");
+        if (changes == null || changes.isEmpty()) throw bad("RESOLUTIONS_REQUIRED", "resolutions must not be empty");
         for (ResolutionChange c : changes) {
-            StoredRow row = repo.row(importId, c.rowNumber()).orElseThrow(() -> bad("Row " + c.rowNumber() + " does not exist"));
-            if (!CONFLICT.equals(row.action())) {
-                throw bad("Row " + c.rowNumber() + " is not a conflict");
+            StoredRow row = repo.row(importId, c.rowNumber()).orElseThrow(() -> bad("ROW_NOT_FOUND", "Row " + c.rowNumber() + " does not exist"));
+            if (row.action() != RowOutcome.CONFLICT) {
+                throw bad("ROW_NOT_A_CONFLICT", "Row " + c.rowNumber() + " is not a conflict");
             }
-            if (c.resolution() == null || !RosterRules.allowedResolutions(row.conflictKind()).contains(c.resolution())) {
-                throw bad("Row " + c.rowNumber() + " (" + row.conflictKind() + ") accepts only "
-                    + RosterRules.allowedResolutions(row.conflictKind()));
+            ResolutionAction chosen = ResolutionAction.parse(c.resolution());
+            List<ResolutionAction> allowed = resolvers.forKind(row.conflictKind()).allowed();
+            if (chosen == null || !allowed.contains(chosen)) {
+                throw bad("RESOLUTION_NOT_ALLOWED", "Row " + c.rowNumber() + " (" + row.conflictKind() + ") accepts only "
+                    + allowed);
             }
-            repo.setResolution(importId, c.rowNumber(), c.resolution());
+            repo.setResolution(importId, c.rowNumber(), chosen);
         }
-        audit.record(user.getId(), "ROSTER_CONFLICTS_RESOLVED", "class", h.classId().toString(),
-            Map.of("importId", importId.toString(), "count", changes.size()));
-        return view(h);
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_CONFLICTS_RESOLVED, "class", h.classId().toString(),
+            Map.of("importId", importId.toString(), "count", changes.size())));
+        return queries.view(h);
     }
 
     // ---- commit ----
@@ -165,17 +149,17 @@ public class RosterImportService {
     }
 
     private Preflight preflight(AppUserDetails user, UUID importId) {
-        ImportHeader h = header(user, importId, false);
-        if ("COMMITTED".equals(h.status())) {
+        ImportHeader h = queries.header(user, importId, false);
+        if (h.status() == ImportStatus.COMMITTED) {
             return new Preflight(previouslyCommitted(h), 0);
         }
         requirePreview(h);
-        return new Preflight(null, (int) repo.countRows(importId, CREATE));
+        return new Preflight(null, (int) repo.countRows(importId, RowOutcome.CREATE));
     }
 
     private CommitResult commitLocked(AppUserDetails user, UUID importId, List<TempCredentialService.Prepared> prepared) {
-        ImportHeader h = header(user, importId, true);
-        if ("COMMITTED".equals(h.status())) {
+        ImportHeader h = queries.header(user, importId, true);
+        if (h.status() == ImportStatus.COMMITTED) {
             return previouslyCommitted(h);           // another commit won the race while we were hashing
         }
         requirePreview(h);
@@ -185,142 +169,72 @@ public class RosterImportService {
         List<StoredRow> stored = repo.allRows(importId);
         int unresolved = repo.summary(importId).unresolvedConflicts();
         if (unresolved > 0) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, unresolved + " conflict(s) still need a resolution");
+            throw ApiException.conflict("UNRESOLVED_CONFLICTS", unresolved + " conflict(s) still need a resolution");
         }
         assertUnchangedSincePreview(classId, stored, user);
-        if (stored.stream().filter(r -> CREATE.equals(r.action())).count() != prepared.size()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "The import changed while it was being prepared; try again");
+        if (stored.stream().filter(r -> r.action() == RowOutcome.CREATE).count() != prepared.size()) {
+            throw ApiException.conflict("IMPORT_CHANGED", "The import changed while it was being prepared; try again");
         }
 
-        int enrolledExisting = 0, skippedDuplicates = 0, skippedByResolution = 0, invalid = 0;
-        List<StoredRow> createdRows = new ArrayList<>();
-        List<UUID> createdIds = new ArrayList<>();
-        for (StoredRow r : stored) {
-            switch (r.action()) {
-                case CREATE -> createdIds.add(createAccount(classId, r, user.getId(), createdRows));
-                case MATCH -> enrolledExisting += enrollExisting(classId, r) ? 1 : 0;
-                case SKIP_DUPLICATE -> skippedDuplicates++;
-                case INVALID -> invalid++;
-                case CONFLICT -> {
-                    switch (r.resolution()) {
-                        case USE_EXISTING -> enrolledExisting += enrollExisting(classId, r) ? 1 : 0;
-                        case SKIP -> skippedByResolution++;
-                        default -> throw new IllegalStateException("Unexpected resolution " + r.resolution());
-                    }
-                }
-                default -> throw new IllegalStateException("Unexpected action " + r.action());
-            }
-        }
-
-        List<TempCredentialService.Issued> issued = tempCredentials.storePrepared(createdIds, prepared, user.getId());
-        List<IssuedCredential> credentials = new ArrayList<>(createdIds.size());
-        for (int i = 0; i < createdIds.size(); i++) {
-            StoredRow r = createdRows.get(i);
-            credentials.add(new IssuedCredential(r.rowNumber(), createdIds.get(i), r.studentNumber(), r.lastName(),
-                r.firstName(), issued.get(i).secret(), issued.get(i).expiresAt()));
-        }
+        CommitResult result = applier.apply(importId, classId, stored, user.getId(), prepared);
 
         Map<String, Object> counts = new LinkedHashMap<>();
-        counts.put("created", createdIds.size());
-        counts.put("enrolledExisting", enrolledExisting);
-        counts.put("skippedDuplicates", skippedDuplicates);
-        counts.put("skippedByResolution", skippedByResolution);
-        counts.put("invalid", invalid);
+        counts.put("created", result.created());
+        counts.put("enrolledExisting", result.enrolledExisting());
+        counts.put("skippedDuplicates", result.skippedDuplicates());
+        counts.put("skippedByResolution", result.skippedByResolution());
+        counts.put("invalid", result.invalid());
         repo.markCommitted(importId, user.getId(), json(counts));
 
         Map<String, Object> auditDetails = new LinkedHashMap<>(counts);
         auditDetails.put("importId", importId.toString());
-        auditDetails.put("createdAccounts", createdIds.stream().map(UUID::toString).toList());
-        audit.record(user.getId(), "ROSTER_IMPORT_COMMITTED", "class", classId.toString(), auditDetails);
-
-        return new CommitResult(importId, false, createdIds.size(), enrolledExisting, skippedDuplicates,
-            skippedByResolution, invalid, credentials);
+        auditDetails.put("createdAccounts", result.credentials().stream().map(c -> c.studentId().toString()).toList());
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_COMMITTED, "class", classId.toString(), auditDetails));
+        return result;
     }
 
     @Transactional
     public void cancel(AppUserDetails user, UUID importId) {
-        ImportHeader h = header(user, importId, true);
-        if ("COMMITTED".equals(h.status())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "A committed import cannot be cancelled");
+        ImportHeader h = queries.header(user, importId, true);
+        if (h.status() == ImportStatus.COMMITTED) {
+            throw ApiException.conflict("IMPORT_ALREADY_COMMITTED", "A committed import cannot be cancelled");
         }
-        if ("PREVIEW".equals(h.status())) {
-            repo.setStatus(importId, "CANCELLED");
-            audit.record(user.getId(), "ROSTER_IMPORT_CANCELLED", "class", h.classId().toString(),
-                Map.of("importId", importId.toString()));
+        if (h.status() == ImportStatus.PREVIEW) {
+            repo.setStatus(importId, ImportStatus.CANCELLED);
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_CANCELLED, "class", h.classId().toString(),
+                Map.of("importId", importId.toString())));
         }
     }
 
     // ---- helpers ----
 
-    /**
-     * The import must exist and the caller must manage its class. Imports are staff-only resources, so
-     * every other case (missing, other class, enrolled student) is the identical 404.
-     */
-    private ImportHeader header(AppUserDetails user, UUID importId, boolean lock) {
-        ImportHeader h = repo.find(importId, lock).orElseThrow(RosterImportService::importNotFound);
-        try {
-            policy.requireClassManage(user, h.classId());
-        } catch (ResponseStatusException e) {
-            throw importNotFound();
-        }
-        return h;
-    }
-
-    private static ApiException importNotFound() {
-        return ApiException.notFound("IMPORT_NOT_FOUND", "Roster import not found");
-    }
-
     private void assertWritable(UUID classId) {
         var cls = classes.lock(classId).orElseThrow(AccessPolicy::classNotFound);
-        if ("ARCHIVED".equals(cls.status())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "The class is archived and read-only");
+        if (cls.status() == ClassStatus.ARCHIVED) {
+            throw ApiException.conflict("CLASS_ARCHIVED", "The class is archived and read-only");
         }
     }
 
     private static void requirePreview(ImportHeader h) {
-        if (!"PREVIEW".equals(h.status())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "The import is " + h.status().toLowerCase());
+        if (h.status() != ImportStatus.PREVIEW) {
+            throw ApiException.conflict("IMPORT_NOT_PENDING", "The import is " + h.status().name().toLowerCase());
         }
     }
 
     private void assertUnchangedSincePreview(UUID classId, List<StoredRow> stored, AppUserDetails committer) {
         List<NormalizedRow> rebuilt = stored.stream().map(r -> new NormalizedRow(r.rowNumber(), r.studentNumber(),
             r.lastName(), r.firstName(), r.middleName(), r.email(), r.program(), r.section(),
-            INVALID.equals(r.action()) ? r.message() : null)).toList();
+            r.action() == RowOutcome.INVALID ? r.message() : null)).toList();
         List<StoredRow> fresh = analyzer.classify(classId, rebuilt, committer);
         for (int i = 0; i < stored.size(); i++) {
             StoredRow was = stored.get(i), now = fresh.get(i);
-            if (!was.action().equals(now.action()) || !Objects.equals(was.conflictKind(), now.conflictKind())
+            if (was.action() != now.action() || was.conflictKind() != now.conflictKind()
                 || !Objects.equals(was.matchedUserId(), now.matchedUserId())) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                throw ApiException.conflict("IMPORT_STALE",
                     "Accounts or enrollments changed since the preview (row " + was.rowNumber()
                         + "); upload the file again");
             }
         }
-    }
-
-    private UUID createAccount(UUID classId, StoredRow r, UUID createdBy, List<StoredRow> createdRows) {
-        UUID id = repo.insertPendingStudent(r.studentNumber(), r.lastName(), r.firstName(), r.middleName(), createdBy);
-        enrollmentRules.enroll(classId, id, r.program(), r.section());
-        createdRows.add(r);
-        return id;
-    }
-
-    /** @return true if the student was newly enrolled or reinstated. */
-    private boolean enrollExisting(UUID classId, StoredRow r) {
-        return enrollmentRules.enroll(classId, r.matchedUserId(), r.program(), r.section())
-            != EnrollmentRules.Outcome.ALREADY_ENROLLED;
-    }
-
-    private ImportView view(ImportHeader h) {
-        return new ImportView(h.id(), h.classId(), h.fileName(), h.status(), h.createdAt(), h.committedAt(),
-            repo.summary(h.id()));
-    }
-
-    private static RowView rowView(StoredRow r) {
-        return new RowView(r.rowNumber(), r.studentNumber(), r.lastName(), r.firstName(), r.middleName(), r.email(),
-            r.program(), r.section(), r.action(), r.conflictKind(), r.resolution(), r.message(),
-            RosterRules.allowedResolutions(r.conflictKind()));
     }
 
     private CommitResult previouslyCommitted(ImportHeader h) {
@@ -346,15 +260,7 @@ public class RosterImportService {
         }
     }
 
-    private static String cleanFileName(String raw) {
-        String name = raw == null ? "" : raw;
-        name = name.substring(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1)
-            .replaceAll("[\\p{Cntrl}]", "").trim();
-        if (name.isEmpty()) name = "roster";
-        return name.length() > 200 ? name.substring(name.length() - 200) : name;
-    }
-
-    private static ResponseStatusException bad(String reason) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, reason);
+    private static ApiException bad(String code, String reason) {
+        return ApiException.badRequest(code, reason);
     }
 }

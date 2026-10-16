@@ -1,7 +1,14 @@
 package com.blissfuljuan.dieapi.roster.repository;
 
+import com.blissfuljuan.dieapi.academic.model.EnrollmentStatus;
+import com.blissfuljuan.dieapi.account.model.AccountStatus;
+import com.blissfuljuan.dieapi.account.model.UserRole;
+import com.blissfuljuan.dieapi.roster.model.ConflictKind;
 import com.blissfuljuan.dieapi.roster.model.ExistingUser;
 import com.blissfuljuan.dieapi.roster.model.ImportHeader;
+import com.blissfuljuan.dieapi.roster.model.ImportStatus;
+import com.blissfuljuan.dieapi.roster.model.ResolutionAction;
+import com.blissfuljuan.dieapi.roster.model.RowOutcome;
 import com.blissfuljuan.dieapi.roster.model.StoredRow;
 import com.blissfuljuan.dieapi.roster.view.Summary;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -36,8 +43,8 @@ public class RosterImportRepository {
                 """)
             .param("n", lowerNumbers)
             .query((rs, i) -> {
-                out.put(rs.getString("num"), new ExistingUser(rs.getObject("id", UUID.class), rs.getString("role"),
-                    rs.getString("status"), rs.getString("last_name"), rs.getString("first_name"),
+                out.put(rs.getString("num"), new ExistingUser(rs.getObject("id", UUID.class),
+                    UserRole.valueOf(rs.getString("role")), AccountStatus.valueOf(rs.getString("status")), rs.getString("last_name"), rs.getString("first_name"),
                     rs.getObject("created_by", UUID.class)));
                 return 0;
             }).list();
@@ -55,11 +62,11 @@ public class RosterImportRepository {
     }
 
     /** Student id -> enrollment status for the class (ENROLLED / REMOVED). */
-    public Map<UUID, String> enrollmentStatuses(UUID classId) {
-        Map<UUID, String> out = new HashMap<>();
+    public Map<UUID, EnrollmentStatus> enrollmentStatuses(UUID classId) {
+        Map<UUID, EnrollmentStatus> out = new HashMap<>();
         jdbc.sql("SELECT student_id, status FROM enrollment WHERE class_id = :c").param("c", classId)
             .query((rs, i) -> {
-                out.put(rs.getObject("student_id", UUID.class), rs.getString("status"));
+                out.put(rs.getObject("student_id", UUID.class), EnrollmentStatus.valueOf(rs.getString("status")));
                 return 0;
             }).list();
         return out;
@@ -84,7 +91,7 @@ public class RosterImportRepository {
                 """)
             .param("i", importId).param("n", r.rowNumber()).param("sn", r.studentNumber()).param("ln", r.lastName())
             .param("fn", r.firstName()).param("mn", r.middleName()).param("em", r.email()).param("pr", r.program())
-            .param("se", r.section()).param("a", r.action()).param("k", r.conflictKind()).param("m", r.message())
+            .param("se", r.section()).param("a", r.action().name()).param("k", name(r.conflictKind())).param("m", r.message())
             .param("u", r.matchedUserId())
             .update();
     }
@@ -95,7 +102,7 @@ public class RosterImportRepository {
                 FROM roster_import WHERE id = :id""" + (lock ? " FOR UPDATE" : ""))
             .param("id", importId)
             .query((rs, n) -> new ImportHeader(rs.getObject("id", UUID.class), rs.getObject("class_id", UUID.class),
-                rs.getObject("uploaded_by", UUID.class), rs.getString("file_name"), rs.getString("status"),
+                rs.getObject("uploaded_by", UUID.class), rs.getString("file_name"), ImportStatus.valueOf(rs.getString("status")),
                 rs.getObject("created_at", OffsetDateTime.class), rs.getObject("committed_at", OffsetDateTime.class),
                 rs.getString("summary")))
             .optional();
@@ -108,14 +115,14 @@ public class RosterImportRepository {
                 """)
             .param("c", classId)
             .query((rs, n) -> new ImportHeader(rs.getObject("id", UUID.class), rs.getObject("class_id", UUID.class),
-                rs.getObject("uploaded_by", UUID.class), rs.getString("file_name"), rs.getString("status"),
+                rs.getObject("uploaded_by", UUID.class), rs.getString("file_name"), ImportStatus.valueOf(rs.getString("status")),
                 rs.getObject("created_at", OffsetDateTime.class), rs.getObject("committed_at", OffsetDateTime.class),
                 rs.getString("summary")))
             .list();
     }
 
-    public void setStatus(UUID importId, String status) {
-        jdbc.sql("UPDATE roster_import SET status = :s WHERE id = :id").param("id", importId).param("s", status).update();
+    public void setStatus(UUID importId, ImportStatus status) {
+        jdbc.sql("UPDATE roster_import SET status = :s WHERE id = :id").param("id", importId).param("s", status.name()).update();
     }
 
     public void markCommitted(UUID importId, UUID by, String summaryJson) {
@@ -134,24 +141,24 @@ public class RosterImportRepository {
             .param("i", importId).query(RosterImportRepository::mapRow).list();
     }
 
-    public List<StoredRow> rows(UUID importId, String action, int page, int size) {
+    public List<StoredRow> rows(UUID importId, RowOutcome action, int page, int size) {
         String filter = action == null ? "" : " AND action = :a";
         var spec = jdbc.sql("SELECT " + ROW_COLUMNS + " FROM roster_import_row WHERE import_id = :i" + filter
                 + " ORDER BY row_number LIMIT :limit OFFSET :offset")
             .param("i", importId).param("limit", size).param("offset", (long) page * size);
-        if (action != null) spec = spec.param("a", action);
+        if (action != null) spec = spec.param("a", action.name());
         return spec.query(RosterImportRepository::mapRow).list();
     }
 
-    public long countRows(UUID importId, String action) {
+    public long countRows(UUID importId, RowOutcome action) {
         var spec = jdbc.sql("SELECT count(*) FROM roster_import_row WHERE import_id = :i"
                 + (action == null ? "" : " AND action = :a")).param("i", importId);
-        if (action != null) spec = spec.param("a", action);
+        if (action != null) spec = spec.param("a", action.name());
         return spec.query(Long.class).single();
     }
 
     public Summary summary(UUID importId) {
-        Map<String, Integer> byAction = new HashMap<>();
+        Map<RowOutcome, Integer> byAction = new EnumMap<>(RowOutcome.class);
         int[] unresolved = {0};
         jdbc.sql("""
                 SELECT action, count(*) AS n, count(*) FILTER (WHERE action = 'CONFLICT' AND resolution IS NULL) AS open
@@ -159,22 +166,22 @@ public class RosterImportRepository {
                 """)
             .param("i", importId)
             .query((rs, i) -> {
-                byAction.put(rs.getString("action"), rs.getInt("n"));
+                byAction.put(RowOutcome.valueOf(rs.getString("action")), rs.getInt("n"));
                 unresolved[0] += rs.getInt("open");
                 return 0;
             }).list();
         int total = byAction.values().stream().mapToInt(Integer::intValue).sum();
-        return new Summary(total, byAction.getOrDefault("CREATE", 0), byAction.getOrDefault("MATCH", 0),
-            byAction.getOrDefault("SKIP_DUPLICATE", 0), byAction.getOrDefault("CONFLICT", 0),
-            byAction.getOrDefault("INVALID", 0), unresolved[0]);
+        return new Summary(total, byAction.getOrDefault(RowOutcome.CREATE, 0), byAction.getOrDefault(RowOutcome.MATCH, 0),
+            byAction.getOrDefault(RowOutcome.SKIP_DUPLICATE, 0), byAction.getOrDefault(RowOutcome.CONFLICT, 0),
+            byAction.getOrDefault(RowOutcome.INVALID, 0), unresolved[0]);
     }
 
-    public int setResolution(UUID importId, int rowNumber, String resolution) {
+    public int setResolution(UUID importId, int rowNumber, ResolutionAction resolution) {
         return jdbc.sql("""
                 UPDATE roster_import_row SET resolution = :r
                 WHERE import_id = :i AND row_number = :n AND action = 'CONFLICT'
                 """)
-            .param("i", importId).param("n", rowNumber).param("r", resolution).update();
+            .param("i", importId).param("n", rowNumber).param("r", resolution.name()).update();
     }
 
     public Optional<StoredRow> row(UUID importId, int rowNumber) {
@@ -182,10 +189,15 @@ public class RosterImportRepository {
             .param("i", importId).param("n", rowNumber).query(RosterImportRepository::mapRow).optional();
     }
 
+    private static String name(Enum<?> value) {
+        return value == null ? null : value.name();
+    }
+
     private static StoredRow mapRow(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new StoredRow(rs.getInt("row_number"), rs.getString("student_number"), rs.getString("last_name"),
             rs.getString("first_name"), rs.getString("middle_name"), rs.getString("email"), rs.getString("program"),
-            rs.getString("section"), rs.getString("action"), rs.getString("conflict_kind"), rs.getString("resolution"),
+            rs.getString("section"), RowOutcome.valueOf(rs.getString("action")),
+            ConflictKind.parse(rs.getString("conflict_kind")), ResolutionAction.parse(rs.getString("resolution")),
             rs.getString("message"), rs.getObject("user_id", UUID.class));
     }
 

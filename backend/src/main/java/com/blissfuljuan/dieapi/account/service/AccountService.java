@@ -1,17 +1,20 @@
 package com.blissfuljuan.dieapi.account.service;
 
+import com.blissfuljuan.dieapi.account.model.AccountStatus;
 import com.blissfuljuan.dieapi.account.model.CreateUser;
 import com.blissfuljuan.dieapi.account.model.LockedAccount;
 import com.blissfuljuan.dieapi.account.model.UpdateUser;
+import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.account.repository.AccountRepository;
 import com.blissfuljuan.dieapi.account.view.AccountChange;
 import com.blissfuljuan.dieapi.account.view.UserPage;
 import com.blissfuljuan.dieapi.account.view.UserView;
-import com.blissfuljuan.dieapi.audit.service.AuditService;
-import org.springframework.http.HttpStatus;
+import com.blissfuljuan.dieapi.audit.model.AuditAction;
+import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import org.springframework.context.ApplicationEventPublisher;
+import com.blissfuljuan.dieapi.common.exception.ApiException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
 
@@ -23,24 +26,22 @@ import java.util.*;
 @Service
 public class AccountService {
 
-    private static final Set<String> ROLES = Set.of("STUDENT", "INSTRUCTOR", "ADMIN");
-
     private final AccountRepository repo;
     private final TempCredentialService credentials;
     private final SessionRevocationService sessions;
-    private final AuditService audit;
+    private final ApplicationEventPublisher events;
 
     public AccountService(AccountRepository repo, TempCredentialService credentials,
-                          SessionRevocationService sessions, AuditService audit) {
+                          SessionRevocationService sessions, ApplicationEventPublisher events) {
         this.repo = repo;
         this.credentials = credentials;
         this.sessions = sessions;
-        this.audit = audit;
+        this.events = events;
     }
 
     @Transactional
     public AccountChange create(CreateUser req, UUID actor) {
-        String role = validRole(req.role());
+        UserRole role = validRole(req.role());
         String last = required(req.lastName(), "lastName");
         String first = required(req.firstName(), "firstName");
         String studentNumber = blankToNull(req.studentNumber());
@@ -49,23 +50,23 @@ public class AccountService {
 
         UUID id = repo.insert(role, studentNumber, last, first, blankToNull(req.middleName()), email, actor);
         var issued = credentials.issue(id, actor);
-        audit.record(actor, "USER_CREATED", "user", id.toString(), Map.of("role", role));
+        events.publishEvent(AuditEvent.of(actor, AuditAction.USER_CREATED, "user", id.toString(), Map.of("role", role.name())));
         return new AccountChange(repo.find(id).orElseThrow(), issued.secret(), issued.expiresAt());
     }
 
     @Transactional
     public UserView update(UUID id, UpdateUser req, UUID actor) {
         if (req.version() == null) {
-            throw status(HttpStatus.BAD_REQUEST, "version is required");
+            throw ApiException.badRequest("VERSION_REQUIRED", "version is required");
         }
         LockedAccount cur = lock(id);
         if (cur.version() != req.version()) {
-            throw status(HttpStatus.CONFLICT, "The account was modified by someone else; reload and retry");
+            throw ApiException.conflict("ACCOUNT_VERSION_CONFLICT", "The account was modified by someone else; reload and retry");
         }
-        String role = req.role() == null ? cur.role() : validRole(req.role());
-        boolean roleChanged = !role.equals(cur.role());
+        UserRole role = req.role() == null ? cur.role() : validRole(req.role());
+        boolean roleChanged = role != cur.role();
         if (roleChanged && id.equals(actor)) {
-            throw status(HttpStatus.CONFLICT, "You cannot change your own role");
+            throw ApiException.conflict("CANNOT_CHANGE_OWN_ROLE", "You cannot change your own role");
         }
         String studentNumber = req.studentNumber() == null ? cur.studentNumber() : blankToNull(req.studentNumber());
         String last = req.lastName() == null ? cur.lastName() : required(req.lastName(), "lastName");
@@ -76,9 +77,9 @@ public class AccountService {
         if (req.email() != null) {
             String requested = normalizeEmail(req.email());
             if (requested != null && !requested.equals(cur.email())) {
-                if (!"PENDING_ACTIVATION".equals(cur.status())) {
+                if (cur.status() != AccountStatus.PENDING_ACTIVATION) {
                     // Changing a verified login email needs the verification flow (account recovery).
-                    throw status(HttpStatus.CONFLICT, "Email can only be changed before activation");
+                    throw ApiException.conflict("EMAIL_CHANGE_NOT_ALLOWED", "Email can only be changed before activation");
                 }
                 email = requested;
             }
@@ -94,11 +95,11 @@ public class AccountService {
 
         repo.updateProfile(id, role, studentNumber, last, first, middle, email);
         if (roleChanged) {
-            audit.record(actor, "ROLE_CHANGED", "user", id.toString(), Map.of("from", cur.role(), "to", role));
+            events.publishEvent(AuditEvent.of(actor, AuditAction.ROLE_CHANGED, "user", id.toString(), Map.of("from", cur.role().name(), "to", role.name())));
             sessions.revokeAllAfterCommit(id); // authorities are cached in the session
         }
         if (!changed.isEmpty()) {
-            audit.record(actor, "USER_UPDATED", "user", id.toString(), Map.of("fields", changed));
+            events.publishEvent(AuditEvent.of(actor, AuditAction.USER_UPDATED, "user", id.toString(), Map.of("fields", changed)));
         }
         return repo.find(id).orElseThrow();
     }
@@ -107,11 +108,11 @@ public class AccountService {
     public UserView deactivate(UUID id, UUID actor) {
         forbidSelf(id, actor, "deactivate");
         LockedAccount cur = lock(id);
-        if (!"DEACTIVATED".equals(cur.status())) {
-            repo.setStatus(id, "DEACTIVATED");
+        if (cur.status() != AccountStatus.DEACTIVATED) {
+            repo.setStatus(id, AccountStatus.DEACTIVATED);
             credentials.invalidateActive(id, "LOCKED");
             sessions.revokeAllAfterCommit(id);
-            audit.record(actor, "USER_DEACTIVATED", "user", id.toString(), Map.of("previousStatus", cur.status()));
+            events.publishEvent(AuditEvent.of(actor, AuditAction.USER_DEACTIVATED, "user", id.toString(), Map.of("previousStatus", cur.status().name())));
         }
         return repo.find(id).orElseThrow();
     }
@@ -120,14 +121,15 @@ public class AccountService {
     @Transactional
     public AccountChange activate(UUID id, UUID actor) {
         LockedAccount cur = lock(id);
-        if (!"DEACTIVATED".equals(cur.status())) {
-            throw status(HttpStatus.CONFLICT, "Only deactivated accounts can be re-activated");
+        if (cur.status() != AccountStatus.DEACTIVATED) {
+            throw ApiException.conflict("ACCOUNT_NOT_DEACTIVATED", "Only deactivated accounts can be re-activated");
         }
         boolean canLogIn = cur.hasPassword() && cur.emailVerified();
-        repo.setStatus(id, canLogIn ? "ACTIVE" : "PENDING_ACTIVATION");
+        AccountStatus resulting = canLogIn ? AccountStatus.ACTIVE : AccountStatus.PENDING_ACTIVATION;
+        repo.setStatus(id, resulting);
         TempCredentialService.Issued issued = canLogIn ? null : credentials.issue(id, actor);
-        audit.record(actor, "USER_ACTIVATED", "user", id.toString(),
-            Map.of("resultingStatus", canLogIn ? "ACTIVE" : "PENDING_ACTIVATION"));
+        events.publishEvent(AuditEvent.of(actor, AuditAction.USER_ACTIVATED, "user", id.toString(),
+            Map.of("resultingStatus", resulting.name())));
         return new AccountChange(repo.find(id).orElseThrow(),
             issued == null ? null : issued.secret(), issued == null ? null : issued.expiresAt());
     }
@@ -140,61 +142,64 @@ public class AccountService {
     public AccountChange resetCredentials(UUID id, UUID actor) {
         forbidSelf(id, actor, "reset the credentials of");
         LockedAccount cur = lock(id);
-        if ("DEACTIVATED".equals(cur.status())) {
-            throw status(HttpStatus.CONFLICT, "Re-activate the account before resetting credentials");
+        if (cur.status() == AccountStatus.DEACTIVATED) {
+            throw ApiException.conflict("ACCOUNT_DEACTIVATED", "Re-activate the account before resetting credentials");
         }
         repo.clearPasswordAndSetPending(id);
         var issued = credentials.issue(id, actor);
         sessions.revokeAllAfterCommit(id);
-        audit.record(actor, "CREDENTIALS_RESET", "user", id.toString(), Map.of("previousStatus", cur.status()));
+        events.publishEvent(AuditEvent.of(actor, AuditAction.CREDENTIALS_RESET, "user", id.toString(), Map.of("previousStatus", cur.status().name())));
         return new AccountChange(repo.find(id).orElseThrow(), issued.secret(), issued.expiresAt());
     }
 
     @Transactional(readOnly = true)
     public UserView get(UUID id) {
-        return repo.find(id).orElseThrow(() -> status(HttpStatus.NOT_FOUND, "User not found"));
+        return repo.find(id).orElseThrow(() -> ApiException.notFound("USER_NOT_FOUND", "User not found"));
     }
 
     @Transactional(readOnly = true)
     public UserPage search(String role, String statusFilter, String q, int page, int size) {
-        if (role != null) validRole(role);
-        if (statusFilter != null && !Set.of("PENDING_ACTIVATION", "ACTIVE", "DEACTIVATED").contains(statusFilter)) {
-            throw status(HttpStatus.BAD_REQUEST, "Unknown status");
+        UserRole roleFilter = role == null ? null : validRole(role);
+        AccountStatus parsedStatus = null;
+        if (statusFilter != null) {
+            parsedStatus = AccountStatus.parse(statusFilter);
+            if (parsedStatus == null) throw ApiException.badRequest("INVALID_STATUS_FILTER", "Unknown status");
         }
-        return repo.search(role, statusFilter, q, Math.max(page, 0), Math.min(Math.max(size, 1), 100));
+        return repo.search(roleFilter, parsedStatus, q, Math.max(page, 0), Math.min(Math.max(size, 1), 100));
     }
 
     // ---- helpers ----
 
     private LockedAccount lock(UUID id) {
-        return repo.lock(id).orElseThrow(() -> status(HttpStatus.NOT_FOUND, "User not found"));
+        return repo.lock(id).orElseThrow(() -> ApiException.notFound("USER_NOT_FOUND", "User not found"));
     }
 
     private static void forbidSelf(UUID id, UUID actor, String verb) {
         if (id.equals(actor)) {
-            throw status(HttpStatus.CONFLICT, "You cannot " + verb + " your own account");
+            throw ApiException.conflict("SELF_ACTION_FORBIDDEN", "You cannot " + verb + " your own account");
         }
     }
 
-    private static void requireIdentity(String role, String studentNumber, String email) {
-        if ("STUDENT".equals(role) && studentNumber == null) {
-            throw status(HttpStatus.BAD_REQUEST, "studentNumber is required for students");
+    private static void requireIdentity(UserRole role, String studentNumber, String email) {
+        if (role == UserRole.STUDENT && studentNumber == null) {
+            throw ApiException.badRequest("STUDENT_NUMBER_REQUIRED", "studentNumber is required for students");
         }
-        if (!"STUDENT".equals(role) && email == null) {
-            throw status(HttpStatus.BAD_REQUEST, "email is required for instructors and administrators");
+        if (role != UserRole.STUDENT && email == null) {
+            throw ApiException.badRequest("EMAIL_REQUIRED", "email is required for instructors and administrators");
         }
     }
 
-    private static String validRole(String role) {
-        if (role == null || !ROLES.contains(role)) {
-            throw status(HttpStatus.BAD_REQUEST, "role must be STUDENT, INSTRUCTOR or ADMIN");
+    private static UserRole validRole(String role) {
+        UserRole parsed = UserRole.parse(role);
+        if (parsed == null) {
+            throw ApiException.badRequest("INVALID_ROLE", "role must be STUDENT, INSTRUCTOR or ADMIN");
         }
-        return role;
+        return parsed;
     }
 
     private static String required(String value, String field) {
         String v = blankToNull(value);
-        if (v == null) throw status(HttpStatus.BAD_REQUEST, field + " is required");
+        if (v == null) throw ApiException.badRequest("FIELD_REQUIRED", field + " is required");
         return v;
     }
 
@@ -205,9 +210,5 @@ public class AccountService {
     private static String normalizeEmail(String v) {
         String s = blankToNull(v);
         return s == null ? null : s.toLowerCase(Locale.ROOT);
-    }
-
-    private static ResponseStatusException status(HttpStatus s, String reason) {
-        return new ResponseStatusException(s, reason);
     }
 }

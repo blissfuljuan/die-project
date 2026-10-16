@@ -1,17 +1,19 @@
 package com.blissfuljuan.dieapi.auth.service;
 
 import com.blissfuljuan.dieapi.account.service.SessionRevocationService;
-import com.blissfuljuan.dieapi.audit.service.AuditService;
+import com.blissfuljuan.dieapi.audit.model.AuditAction;
+import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.auth.model.rule.ThrottleBucket;
+import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.common.util.AfterCommit;
 import com.blissfuljuan.dieapi.common.util.Tokens;
 import com.blissfuljuan.dieapi.mail.service.EmailSender;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
+import com.blissfuljuan.dieapi.common.exception.ApiException;
 
 import java.util.*;
 
@@ -32,13 +34,13 @@ public class PasswordService {
     private final LoginThrottleService throttle;
     private final SessionRevocationService sessions;
     private final EmailSender mail;
-    private final AuditService audit;
+    private final ApplicationEventPublisher events;
     private final int resetMinutes;
     private final String frontendBaseUrl;
 
     public PasswordService(JdbcClient jdbc, PasswordEncoder encoder, PasswordPolicy policy,
                            LoginThrottleService throttle, SessionRevocationService sessions,
-                           EmailSender mail, AuditService audit,
+                           EmailSender mail, ApplicationEventPublisher events,
                            @Value("${die.auth.password-reset-minutes:60}") int resetMinutes,
                            @Value("${die.frontend-base-url:http://localhost:5173}") String frontendBaseUrl) {
         this.jdbc = jdbc;
@@ -47,7 +49,7 @@ public class PasswordService {
         this.throttle = throttle;
         this.sessions = sessions;
         this.mail = mail;
-        this.audit = audit;
+        this.events = events;
         this.resetMinutes = resetMinutes;
         this.frontendBaseUrl = frontendBaseUrl.replaceAll("/+$", "");
     }
@@ -59,7 +61,7 @@ public class PasswordService {
     @Transactional
     public void requestReset(String rawEmail, String clientIp) {
         String email = rawEmail.trim().toLowerCase(Locale.ROOT);
-        String key = LoginThrottleService.RESET_PREFIX + email;
+        String key = ThrottleBucket.resetKey(email);
         throttle.assertResetAllowed(key, clientIp);
         throttle.record(key, clientIp, false);
 
@@ -84,7 +86,7 @@ public class PasswordService {
                 VALUES (:u, :h, now() + make_interval(mins => :m))
                 """)
             .param("u", a.id()).param("h", Tokens.sha256(token)).param("m", resetMinutes).update();
-        audit.record(a.id(), "PASSWORD_RESET_REQUESTED", "user", a.id().toString(), Map.of());
+        events.publishEvent(AuditEvent.of(a.id(), AuditAction.PASSWORD_RESET_REQUESTED, "user", a.id().toString(), Map.of()));
 
         String body = "Hello " + a.firstName() + ",\n\nSomeone asked to reset the password of your "
             + "Document-Implementation Evaluator account. To choose a new password open:\n\n"
@@ -109,7 +111,7 @@ public class PasswordService {
             .query((rs, n) -> new Row(rs.getObject("token_id", UUID.class), rs.getObject("user_id", UUID.class),
                 rs.getString("email"), rs.getString("first_name")))
             .optional()
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, INVALID_LINK));
+            .orElseThrow(() -> ApiException.badRequest("RESET_LINK_INVALID", INVALID_LINK));
 
         policy.validate(newPassword, List.of(row.email())); // rolls back: the link stays usable for a retry
 
@@ -120,12 +122,12 @@ public class PasswordService {
             .param("u", row.userId()).update();
         sessions.revokeAllAfterCommit(row.userId());
         throttle.record(row.email().toLowerCase(Locale.ROOT), clientIp, true);
-        audit.record(row.userId(), "PASSWORD_RESET_COMPLETED", "user", row.userId().toString(), Map.of());
+        events.publishEvent(AuditEvent.of(row.userId(), AuditAction.PASSWORD_RESET_COMPLETED, "user", row.userId().toString(), Map.of()));
         sendChangedNotice(row.email(), row.firstName());
     }
 
     /** Authenticated change. Other sessions are revoked; the calling session stays signed in. */
-    @Transactional(noRollbackFor = ResponseStatusException.class)
+    @Transactional(noRollbackFor = ApiException.class)
     public void change(UUID userId, String currentSessionId, String currentPassword, String newPassword,
                        String clientIp) {
         String key = "pwchange:" + userId;
@@ -139,15 +141,15 @@ public class PasswordService {
 
         if (!encoder.matches(currentPassword, row.get("hash"))) {
             throttle.record(key, clientIp, false);
-            audit.record(userId, "PASSWORD_CHANGE_FAILED", "user", userId.toString(), Map.of());
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+            events.publishEvent(AuditEvent.of(userId, AuditAction.PASSWORD_CHANGE_FAILED, "user", userId.toString(), Map.of()));
+            throw ApiException.badRequest("CURRENT_PASSWORD_INCORRECT", "Current password is incorrect");
         }
         policy.validate(newPassword, List.of(row.get("email"), currentPassword));
 
         setPassword(userId, newPassword);
         sessions.revokeAllExceptAfterCommit(userId, currentSessionId);
         throttle.record(key, clientIp, true);
-        audit.record(userId, "PASSWORD_CHANGED", "user", userId.toString(), Map.of());
+        events.publishEvent(AuditEvent.of(userId, AuditAction.PASSWORD_CHANGED, "user", userId.toString(), Map.of()));
         sendChangedNotice(row.get("email"), row.get("first"));
     }
 

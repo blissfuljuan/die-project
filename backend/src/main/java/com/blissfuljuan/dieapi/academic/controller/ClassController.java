@@ -1,5 +1,10 @@
 package com.blissfuljuan.dieapi.academic.controller;
 
+import com.blissfuljuan.dieapi.academic.model.CreateClass;
+import com.blissfuljuan.dieapi.academic.model.EnrollStudent;
+import com.blissfuljuan.dieapi.academic.model.UpdateClass;
+import com.blissfuljuan.dieapi.academic.service.ClassEnrollmentService;
+import com.blissfuljuan.dieapi.academic.service.ClassInstructorService;
 import com.blissfuljuan.dieapi.academic.service.ClassService;
 import com.blissfuljuan.dieapi.academic.view.ClassPage;
 import com.blissfuljuan.dieapi.academic.view.ClassView;
@@ -22,7 +27,7 @@ import java.util.UUID;
 
 /**
  * Classes and enrollments. Role gates here are coarse; the fine-grained decision (admin, assigned
- * instructor, enrolled student) is always made by AccessPolicy inside ClassService.
+ * instructor, enrolled student) is always made by AccessPolicy inside the class services.
  */
 @RestController
 @RequestMapping("/api/v1/classes")
@@ -48,9 +53,13 @@ public class ClassController {
                                 @Size(max = 100) String program, @Size(max = 100) String section) {}
 
     private final ClassService classes;
+    private final ClassInstructorService instructors;
+    private final ClassEnrollmentService enrollments;
 
-    public ClassController(ClassService classes) {
+    public ClassController(ClassService classes, ClassInstructorService instructors, ClassEnrollmentService enrollments) {
         this.classes = classes;
+        this.instructors = instructors;
+        this.enrollments = enrollments;
     }
 
     @GetMapping
@@ -66,7 +75,7 @@ public class ClassController {
     @PreAuthorize("hasAnyRole('ADMIN','INSTRUCTOR')")
     public ResponseEntity<ClassView> create(@AuthenticationPrincipal AppUserDetails user,
                                             @Valid @RequestBody CreateClassRequest body) {
-        ClassView created = classes.create(user, new ClassService.CreateClass(body.academicYear(), body.semester(),
+        ClassView created = classes.create(user, new CreateClass(body.academicYear(), body.semester(),
             body.subjectCode(), body.subjectName(), body.section(), body.teamFormation(), body.teamMinSize(),
             body.teamMaxSize(), body.studentsMayChangeTeams(), body.instructorIds()));
         return ResponseEntity.created(URI.create("/api/v1/classes/" + created.id())).body(created);
@@ -80,7 +89,7 @@ public class ClassController {
     @PatchMapping("/{id}")
     public ClassView update(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                             @Valid @RequestBody UpdateClassRequest body) {
-        return classes.update(user, id, new ClassService.UpdateClass(body.version(), body.academicYear(),
+        return classes.update(user, id, new UpdateClass(body.version(), body.academicYear(),
             body.semester(), body.subjectCode(), body.subjectName(), body.section(), body.teamFormation(),
             body.teamMinSize(), body.teamMaxSize(), body.studentsMayChangeTeams()));
     }
@@ -102,20 +111,20 @@ public class ClassController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void setInstructors(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                                @Valid @RequestBody InstructorsRequest body) {
-        classes.setInstructors(user, id, body.instructorIds());
+        instructors.setInstructors(user, id, body.instructorIds());
     }
 
     @GetMapping("/{id}/enrollments")
     public List<EnrollmentView> roster(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                                        @RequestParam(defaultValue = "false") boolean includeRemoved) {
-        return classes.roster(user, id, includeRemoved);
+        return enrollments.roster(user, id, includeRemoved);
     }
 
     @PostMapping("/{id}/enrollments")
     @ResponseStatus(HttpStatus.CREATED)
     public void enroll(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                        @Valid @RequestBody EnrollRequest body) {
-        classes.enroll(user, id, new ClassService.Enroll(body.studentId(), body.studentNumber(), body.lastName(),
+        enrollments.enroll(user, id, new EnrollStudent(body.studentId(), body.studentNumber(), body.lastName(),
             body.program(), body.section()));
     }
 
@@ -124,13 +133,13 @@ public class ClassController {
     public ResponseEntity<TemporaryCredentialView> reissueTemporaryCredential(
             @AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id, @PathVariable UUID studentId) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-            .body(classes.reissueTemporaryCredential(user, id, studentId));
+            .body(enrollments.reissueTemporaryCredential(user, id, studentId));
     }
 
     @DeleteMapping("/{id}/enrollments/{studentId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void unenroll(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                          @PathVariable UUID studentId) {
-        classes.unenroll(user, id, studentId);
+        enrollments.unenroll(user, id, studentId);
     }
 }

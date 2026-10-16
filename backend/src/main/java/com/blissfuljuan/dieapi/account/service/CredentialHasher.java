@@ -59,7 +59,7 @@ public class CredentialHasher implements DisposableBean {
 
     /**
      * Generates {@code count} secrets and their hashes, in order. Call it OUTSIDE any database transaction.
-     * @throws ResponseStatusException 503 when the pool is saturated or the deadline passes
+     * @throws ApiException 503 when the pool is saturated or the deadline passes
      */
     public List<Prepared> prepare(int count) {
         List<Future<Prepared>> futures = new ArrayList<>(count);

@@ -1,36 +1,33 @@
 package com.blissfuljuan.dieapi.auth.service;
 
+import com.blissfuljuan.dieapi.auth.model.rule.ThrottleBucket;
+import com.blissfuljuan.dieapi.auth.model.rule.ThrottlePolicy;
+import com.blissfuljuan.dieapi.auth.repository.LoginAttemptRepository;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
 /**
  * Failed-attempt throttling per identifier and per client address, backed by login_attempt so it
- * holds across API instances. Identifiers are namespaced ("act:", "pwchange:", "pwreset:" prefixes;
- * login uses the bare email).
+ * holds across API instances. Used by login, activation and password change/reset. Identifiers are
+ * namespaced ("act:", "pwchange:", "pwreset:" prefixes; login uses the bare email).
  *
- * Password-reset requests are tracked in their own bucket: they must never consume the per-IP login
- * budget, otherwise anonymous reset requests could lock everyone behind one address out of signing in.
+ * Password-reset requests are tracked in their own {@link ThrottleBucket}: they must never consume the
+ * per-IP login budget, otherwise anonymous reset requests could lock everyone behind one address out of
+ * signing in. The limits are one {@link ThrottlePolicy}; this class counts (via the repository) and enforces.
  */
 @Service
 public class LoginThrottleService {
 
-    static final String RESET_PREFIX = "pwreset:";
+    private final LoginAttemptRepository attempts;
+    private final ThrottlePolicy policy;
 
-    private final JdbcClient jdbc;
-    private final int maxPerIdentifier;
-    private final int maxPerIp;
-    private final int windowMinutes;
-
-    public LoginThrottleService(JdbcClient jdbc,
+    public LoginThrottleService(LoginAttemptRepository attempts,
                                 @Value("${die.auth.max-failed-per-identifier:5}") int maxPerIdentifier,
                                 @Value("${die.auth.max-failed-per-ip:20}") int maxPerIp,
                                 @Value("${die.auth.throttle-window-minutes:15}") int windowMinutes) {
-        this.jdbc = jdbc;
-        this.maxPerIdentifier = maxPerIdentifier;
-        this.maxPerIp = maxPerIp;
-        this.windowMinutes = windowMinutes;
+        this.attempts = attempts;
+        this.policy = new ThrottlePolicy(maxPerIdentifier, maxPerIp, windowMinutes);
     }
 
     /**
@@ -38,53 +35,26 @@ public class LoginThrottleService {
      * reset requests) has too many failures. Failures are counted since the identifier's last success.
      */
     public void assertAllowed(String identifier, String clientIp) {
-        long byIdentifier = failuresForIdentifier(identifier);
-        long byIp = clientIp == null ? 0 : jdbc.sql("""
-                SELECT count(*) FROM login_attempt
-                WHERE client_ip = :ip AND NOT succeeded
-                  AND identifier NOT LIKE 'pwreset:%'
-                  AND attempted_at > now() - make_interval(mins => :w)
-                """)
-            .param("ip", clientIp).param("w", windowMinutes)
-            .query(Long.class).single();
-        enforce(byIdentifier >= maxPerIdentifier || byIp >= maxPerIp);
+        assertAllowed(ThrottleBucket.LOGIN, identifier, clientIp);
     }
 
     /** For password-reset requests: own per-identifier and per-IP budgets. Same answer for any address. */
     public void assertResetAllowed(String resetKey, String clientIp) {
-        long byIdentifier = failuresForIdentifier(resetKey);
-        long byIp = clientIp == null ? 0 : jdbc.sql("""
-                SELECT count(*) FROM login_attempt
-                WHERE client_ip = :ip AND NOT succeeded
-                  AND identifier LIKE 'pwreset:%'
-                  AND attempted_at > now() - make_interval(mins => :w)
-                """)
-            .param("ip", clientIp).param("w", windowMinutes)
-            .query(Long.class).single();
-        enforce(byIdentifier >= maxPerIdentifier || byIp >= maxPerIp);
+        assertAllowed(ThrottleBucket.PASSWORD_RESET, resetKey, clientIp);
     }
 
     public void record(String identifier, String clientIp, boolean succeeded) {
-        jdbc.sql("INSERT INTO login_attempt (identifier, client_ip, succeeded) VALUES (:id, :ip, :ok)")
-            .param("id", identifier).param("ip", clientIp).param("ok", succeeded)
-            .update();
+        attempts.insert(identifier, clientIp, succeeded);
     }
 
-    private long failuresForIdentifier(String identifier) {
-        return jdbc.sql("""
-                SELECT count(*) FROM login_attempt
-                WHERE identifier = :id AND NOT succeeded
-                  AND attempted_at > now() - make_interval(mins => :w)
-                  AND attempted_at > COALESCE(
-                        (SELECT max(attempted_at) FROM login_attempt WHERE identifier = :id AND succeeded),
-                        '-infinity'::timestamptz)
-                """)
-            .param("id", identifier).param("w", windowMinutes)
-            .query(Long.class).single();
-    }
-
-    private static void enforce(boolean blocked) {
-        if (blocked) {
+    private void assertAllowed(ThrottleBucket bucket, String identifier, String clientIp) {
+        int window = policy.windowMinutes();
+        long byIdentifier = attempts.failuresForIdentifier(identifier, window);
+        long byIp = clientIp == null ? 0 : switch (bucket) {
+            case LOGIN -> attempts.failuresForIpExcludingPrefix(clientIp, ThrottleBucket.RESET_PREFIX, window);
+            case PASSWORD_RESET -> attempts.failuresForIpWithPrefix(clientIp, ThrottleBucket.RESET_PREFIX, window);
+        };
+        if (policy.blocks(byIdentifier, byIp)) {
             throw ApiException.tooManyRequests("TOO_MANY_ATTEMPTS", "Too many attempts. Wait a while before trying again.");
         }
     }

@@ -1,6 +1,8 @@
 package com.blissfuljuan.dieapi.account.repository;
 
+import com.blissfuljuan.dieapi.account.model.AccountStatus;
 import com.blissfuljuan.dieapi.account.model.LockedAccount;
+import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.account.view.UserPage;
 import com.blissfuljuan.dieapi.account.view.UserView;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -44,40 +46,40 @@ public class AccountRepository {
                 """)
             .param("id", id)
             .query((rs, n) -> new LockedAccount(
-                rs.getObject("id", UUID.class), rs.getString("role"), rs.getString("status"),
-                rs.getBoolean("has_password"), rs.getBoolean("email_verified"), rs.getLong("version"),
+                rs.getObject("id", UUID.class), UserRole.valueOf(rs.getString("role")),
+                AccountStatus.valueOf(rs.getString("status")), rs.getBoolean("has_password"), rs.getBoolean("email_verified"), rs.getLong("version"),
                 rs.getString("student_number"), rs.getString("last_name"), rs.getString("first_name"),
                 rs.getString("middle_name"), rs.getString("email")))
             .optional();
     }
 
-    public UUID insert(String role, String studentNumber, String lastName, String firstName,
+    public UUID insert(UserRole role, String studentNumber, String lastName, String firstName,
                        String middleName, String email, UUID createdBy) {
         return jdbc.sql("""
                 INSERT INTO app_user (role, status, student_number, last_name, first_name, middle_name, email, created_by)
                 VALUES (:role, 'PENDING_ACTIVATION', :sn, :ln, :fn, :mn, :email, :by)
                 RETURNING id
                 """)
-            .param("role", role).param("sn", studentNumber).param("ln", lastName)
+            .param("role", role.name()).param("sn", studentNumber).param("ln", lastName)
             .param("fn", firstName).param("mn", middleName).param("email", email).param("by", createdBy)
             .query(UUID.class).single();
     }
 
-    public void updateProfile(UUID id, String role, String studentNumber, String lastName, String firstName,
+    public void updateProfile(UUID id, UserRole role, String studentNumber, String lastName, String firstName,
                               String middleName, String email) {
         jdbc.sql("""
                 UPDATE app_user SET role = :role, student_number = :sn, last_name = :ln, first_name = :fn,
                        middle_name = :mn, email = :email, updated_at = now(), version = version + 1
                 WHERE id = :id
                 """)
-            .param("id", id).param("role", role).param("sn", studentNumber).param("ln", lastName)
+            .param("id", id).param("role", role.name()).param("sn", studentNumber).param("ln", lastName)
             .param("fn", firstName).param("mn", middleName).param("email", email)
             .update();
     }
 
-    public void setStatus(UUID id, String status) {
+    public void setStatus(UUID id, AccountStatus status) {
         jdbc.sql("UPDATE app_user SET status = :s, updated_at = now(), version = version + 1 WHERE id = :id")
-            .param("id", id).param("s", status).update();
+            .param("id", id).param("s", status.name()).update();
     }
 
     /** Credential reset: no usable password until the user re-activates with a new temporary credential. */
@@ -90,11 +92,11 @@ public class AccountRepository {
             .param("id", id).update();
     }
 
-    public UserPage search(String role, String status, String q, int page, int size) {
+    public UserPage search(UserRole role, AccountStatus status, String q, int page, int size) {
         StringBuilder where = new StringBuilder(" WHERE 1 = 1");
         Map<String, Object> params = new HashMap<>();
-        if (role != null) { where.append(" AND role = :role"); params.put("role", role); }
-        if (status != null) { where.append(" AND status = :status"); params.put("status", status); }
+        if (role != null) { where.append(" AND role = :role"); params.put("role", role.name()); }
+        if (status != null) { where.append(" AND status = :status"); params.put("status", status.name()); }
         if (q != null && !q.isBlank()) {
             String escaped = q.trim().toLowerCase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
             where.append("""

@@ -1,8 +1,7 @@
 package com.blissfuljuan.dieapi.auth.service;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
+import com.blissfuljuan.dieapi.common.exception.ApiException;
 
 import java.util.Collection;
 
@@ -16,22 +15,22 @@ public class PasswordPolicy {
     /** @param forbidden values the password must not equal (identifier, email, temporary credential...) */
     public void validate(String password, Collection<String> forbidden) {
         if (password == null || password.length() < MIN_LENGTH) {
-            throw bad("Password must be at least " + MIN_LENGTH + " characters");
+            throw bad("PASSWORD_TOO_SHORT", "Password must be at least " + MIN_LENGTH + " characters");
         }
         if (password.length() > MAX_LENGTH) {
-            throw bad("Password must be at most " + MAX_LENGTH + " characters");
+            throw bad("PASSWORD_TOO_LONG", "Password must be at most " + MAX_LENGTH + " characters");
         }
         if (password.isBlank()) {
-            throw bad("Password cannot be blank");
+            throw bad("PASSWORD_BLANK", "Password cannot be blank");
         }
         for (String f : forbidden) {
             if (f != null && !f.isBlank() && f.equalsIgnoreCase(password)) {
-                throw bad("Password is too easy to guess");
+                throw bad("PASSWORD_TOO_EASY", "Password is too easy to guess");
             }
         }
     }
 
-    private static ResponseStatusException bad(String reason) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, reason);
+    private static ApiException bad(String code, String reason) {
+        return ApiException.badRequest(code, reason);
     }
 }
