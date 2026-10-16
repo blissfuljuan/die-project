@@ -114,4 +114,20 @@ public class AccountRepository {
             .query(AccountRepository::mapView).list());
         return new UserPage(items, page, size, total);
     }
+
+    public long countAdmins() {
+        return jdbc.sql("SELECT count(*) FROM app_user WHERE role = 'ADMIN'").query(Long.class).single();
+    }
+
+    /** Creates an active, email-verified administrator and returns its id. */
+    public UUID insertBootstrapAdmin(String email, String passwordHash) {
+        return jdbc.sql("""
+                INSERT INTO app_user (role, status, last_name, first_name, email, email_verified_at, password_hash)
+                VALUES ('ADMIN', 'ACTIVE', 'Administrator', 'System', :email, now(), :hash)
+                RETURNING id
+                """)
+            .param("email", email)
+            .param("hash", passwordHash)
+            .query(UUID.class).single();
+    }
 }

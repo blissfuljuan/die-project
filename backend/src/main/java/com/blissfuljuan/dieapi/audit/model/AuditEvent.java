@@ -10,15 +10,21 @@ import java.util.UUID;
  *
  * @param actorUserId  who did it; null for anonymous/system actions
  * @param action       what happened (the enum name is the stored action string)
- * @param resourceType stored resource_type, e.g. "class", "user", "project", "auth"
+ * @param resource     what kind of resource it concerns (stored as its lowercase value in resource_type)
  * @param resourceId   stored resource_id, may be null
  * @param details      stored JSON details, null is stored as an empty object
  */
-public record AuditEvent(UUID actorUserId, AuditAction action, String resourceType, String resourceId,
+public record AuditEvent(UUID actorUserId, AuditAction action, AuditResource resource, String resourceId,
                          Map<String, Object> details) {
 
+    public static AuditEvent of(UUID actorUserId, AuditAction action, AuditResource resource, String resourceId,
+                                Map<String, Object> details) {
+        return new AuditEvent(actorUserId, action, resource, resourceId, details);
+    }
+
+    /** Convenience for callers that only have the stored string ("class", "user", "project", "auth"). */
     public static AuditEvent of(UUID actorUserId, AuditAction action, String resourceType, String resourceId,
                                 Map<String, Object> details) {
-        return new AuditEvent(actorUserId, action, resourceType, resourceId, details);
+        return new AuditEvent(actorUserId, action, AuditResource.fromValue(resourceType), resourceId, details);
     }
 }

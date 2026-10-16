@@ -2,7 +2,7 @@ package com.blissfuljuan.dieapi.audit.service;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
-import org.springframework.jdbc.core.simple.JdbcClient;
+import com.blissfuljuan.dieapi.audit.repository.AuditLogRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -12,11 +12,11 @@ import java.util.UUID;
 @Service
 public class AuditService {
 
-    private final JdbcClient jdbc;
+    private final AuditLogRepository repository;
     private final ObjectMapper mapper;
 
-    public AuditService(JdbcClient jdbc, ObjectMapper mapper) {
-        this.jdbc = jdbc;
+    public AuditService(AuditLogRepository repository, ObjectMapper mapper) {
+        this.repository = repository;
         this.mapper = mapper;
     }
 
@@ -28,15 +28,6 @@ public class AuditService {
         } catch (JacksonException e) {
             throw new IllegalArgumentException("Audit details not serializable", e);
         }
-        jdbc.sql("""
-                INSERT INTO audit_log (actor_user_id, action, resource_type, resource_id, details)
-                VALUES (:actor, :action, :type, :rid, CAST(:details AS jsonb))
-                """)
-            .param("actor", actorUserId)
-            .param("action", action)
-            .param("type", resourceType)
-            .param("rid", resourceId)
-            .param("details", json)
-            .update();
+        repository.insert(actorUserId, action, resourceType, resourceId, json);
     }
 }

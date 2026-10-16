@@ -13,6 +13,7 @@ import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -98,7 +99,7 @@ public class ClassService {
 
         UUID id = repo.insert(fields);
         repo.replaceInstructors(id, teaching);
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_CREATED, "class", id.toString(), Map.of("instructors", teaching.size())));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_CREATED, AuditResource.CLASS, id.toString(), Map.of("instructors", teaching.size())));
         return repo.find(id).orElseThrow();
     }
 
@@ -126,7 +127,7 @@ public class ClassService {
                 + " members, which exceeds the new maximum of " + next.teamMaxSize() + "; adjust that team first");
         }
         repo.update(classId, next);
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_UPDATED, "class", classId.toString(), Map.of()));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_UPDATED, AuditResource.CLASS, classId.toString(), Map.of()));
         return repo.find(classId).orElseThrow();
     }
 
@@ -136,7 +137,7 @@ public class ClassService {
         LockedClass cur = locks.lock(classId);
         if (cur.status() != ClassStatus.ARCHIVED) {
             repo.setStatus(classId, ClassStatus.ARCHIVED);
-            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_ARCHIVED, "class", classId.toString(), Map.of()));
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_ARCHIVED, AuditResource.CLASS, classId.toString(), Map.of()));
         }
         return repo.find(classId).orElseThrow();
     }
@@ -148,7 +149,7 @@ public class ClassService {
         LockedClass cur = locks.lock(classId);
         if (cur.status() == ClassStatus.ARCHIVED) {
             repo.setStatus(classId, ClassStatus.ACTIVE);
-            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_UNARCHIVED, "class", classId.toString(), Map.of()));
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_UNARCHIVED, AuditResource.CLASS, classId.toString(), Map.of()));
         }
         return repo.find(classId).orElseThrow();
     }

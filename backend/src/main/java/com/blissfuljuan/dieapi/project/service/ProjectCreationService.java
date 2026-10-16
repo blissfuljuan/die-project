@@ -4,6 +4,7 @@ import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -62,7 +63,7 @@ public class ProjectCreationService {
 
         ProjectCreationStrategy strategy = strategies.forCase(user.role(), kind);
         UUID projectId = strategy.create(new ProjectCreation(user, classId, cls, kind, title, description, teamName, req));
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_CREATED, "project", projectId.toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_CREATED, AuditResource.PROJECT, projectId.toString(),
             Map.of("classId", classId.toString(), "kind", kind.name())));
         return views.viewOf(projectId, strategy.creatorRole());
     }

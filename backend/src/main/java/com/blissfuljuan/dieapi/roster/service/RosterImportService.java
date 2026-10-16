@@ -6,6 +6,7 @@ import com.blissfuljuan.dieapi.account.service.CredentialHasher;
 import com.blissfuljuan.dieapi.account.service.TempCredentialService;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.academic.model.ClassStatus;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
@@ -16,9 +17,6 @@ import com.blissfuljuan.dieapi.roster.repository.RosterImportRepository;
 import com.blissfuljuan.dieapi.roster.model.rule.ConflictResolvers;
 import com.blissfuljuan.dieapi.roster.view.CommitResult;
 import com.blissfuljuan.dieapi.roster.view.ImportView;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,14 +46,14 @@ public class RosterImportService {
     private final AccessPolicy policy;
     private final ClassRepository classes;
     private final ApplicationEventPublisher events;
-    private final ObjectMapper mapper;
+    private final RosterCommitSupport support;
     private final CommitLimiter limiter;
     private final CredentialHasher hasher;
     private final PlatformTransactionManager txManager;
 
     public RosterImportService(RosterImportRepository repo, RosterImportQueryService queries, RosterParser parser,
                                RosterAnalyzer analyzer, RosterCommitApplier applier, ConflictResolvers resolvers,
-                               AccessPolicy policy, ClassRepository classes, ApplicationEventPublisher events, ObjectMapper mapper,
+                               AccessPolicy policy, ClassRepository classes, ApplicationEventPublisher events, RosterCommitSupport support,
                                CommitLimiter limiter, CredentialHasher hasher, PlatformTransactionManager txManager) {
         this.repo = repo;
         this.queries = queries;
@@ -66,7 +64,7 @@ public class RosterImportService {
         this.policy = policy;
         this.classes = classes;
         this.events = events;
-        this.mapper = mapper;
+        this.support = support;
         this.limiter = limiter;
         this.hasher = hasher;
         this.txManager = txManager;
@@ -87,7 +85,7 @@ public class RosterImportService {
 
         UUID id = repo.insertImport(classId, user.getId(), fileName, Tokens.sha256(bytes));
         analyzed.forEach(r -> repo.insertRow(id, r));
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_PREVIEWED, "class", classId.toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_PREVIEWED, AuditResource.CLASS, classId.toString(),
             Map.of("importId", id.toString(), "rows", analyzed.size())));
         return queries.view(repo.find(id, false).orElseThrow());
     }
@@ -112,7 +110,7 @@ public class RosterImportService {
             }
             repo.setResolution(importId, c.rowNumber(), chosen);
         }
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_CONFLICTS_RESOLVED, "class", h.classId().toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_CONFLICTS_RESOLVED, AuditResource.CLASS, h.classId().toString(),
             Map.of("importId", importId.toString(), "count", changes.size())));
         return queries.view(h);
     }
@@ -151,7 +149,7 @@ public class RosterImportService {
     private Preflight preflight(AppUserDetails user, UUID importId) {
         ImportHeader h = queries.header(user, importId, false);
         if (h.status() == ImportStatus.COMMITTED) {
-            return new Preflight(previouslyCommitted(h), 0);
+            return new Preflight(support.previouslyCommitted(h), 0);
         }
         requirePreview(h);
         return new Preflight(null, (int) repo.countRows(importId, RowOutcome.CREATE));
@@ -160,7 +158,7 @@ public class RosterImportService {
     private CommitResult commitLocked(AppUserDetails user, UUID importId, List<TempCredentialService.Prepared> prepared) {
         ImportHeader h = queries.header(user, importId, true);
         if (h.status() == ImportStatus.COMMITTED) {
-            return previouslyCommitted(h);           // another commit won the race while we were hashing
+            return support.previouslyCommitted(h);           // another commit won the race while we were hashing
         }
         requirePreview(h);
         UUID classId = h.classId();
@@ -171,7 +169,7 @@ public class RosterImportService {
         if (unresolved > 0) {
             throw ApiException.conflict("UNRESOLVED_CONFLICTS", unresolved + " conflict(s) still need a resolution");
         }
-        assertUnchangedSincePreview(classId, stored, user);
+        support.assertUnchangedSincePreview(classId, stored, user);
         if (stored.stream().filter(r -> r.action() == RowOutcome.CREATE).count() != prepared.size()) {
             throw ApiException.conflict("IMPORT_CHANGED", "The import changed while it was being prepared; try again");
         }
@@ -184,12 +182,12 @@ public class RosterImportService {
         counts.put("skippedDuplicates", result.skippedDuplicates());
         counts.put("skippedByResolution", result.skippedByResolution());
         counts.put("invalid", result.invalid());
-        repo.markCommitted(importId, user.getId(), json(counts));
+        repo.markCommitted(importId, user.getId(), support.json(counts));
 
         Map<String, Object> auditDetails = new LinkedHashMap<>(counts);
         auditDetails.put("importId", importId.toString());
         auditDetails.put("createdAccounts", result.credentials().stream().map(c -> c.studentId().toString()).toList());
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_COMMITTED, "class", classId.toString(), auditDetails));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_COMMITTED, AuditResource.CLASS, classId.toString(), auditDetails));
         return result;
     }
 
@@ -201,7 +199,7 @@ public class RosterImportService {
         }
         if (h.status() == ImportStatus.PREVIEW) {
             repo.setStatus(importId, ImportStatus.CANCELLED);
-            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_CANCELLED, "class", h.classId().toString(),
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_CANCELLED, AuditResource.CLASS, h.classId().toString(),
                 Map.of("importId", importId.toString())));
         }
     }
@@ -218,45 +216,6 @@ public class RosterImportService {
     private static void requirePreview(ImportHeader h) {
         if (h.status() != ImportStatus.PREVIEW) {
             throw ApiException.conflict("IMPORT_NOT_PENDING", "The import is " + h.status().name().toLowerCase());
-        }
-    }
-
-    private void assertUnchangedSincePreview(UUID classId, List<StoredRow> stored, AppUserDetails committer) {
-        List<NormalizedRow> rebuilt = stored.stream().map(r -> new NormalizedRow(r.rowNumber(), r.studentNumber(),
-            r.lastName(), r.firstName(), r.middleName(), r.email(), r.program(), r.section(),
-            r.action() == RowOutcome.INVALID ? r.message() : null)).toList();
-        List<StoredRow> fresh = analyzer.classify(classId, rebuilt, committer);
-        for (int i = 0; i < stored.size(); i++) {
-            StoredRow was = stored.get(i), now = fresh.get(i);
-            if (was.action() != now.action() || was.conflictKind() != now.conflictKind()
-                || !Objects.equals(was.matchedUserId(), now.matchedUserId())) {
-                throw ApiException.conflict("IMPORT_STALE",
-                    "Accounts or enrollments changed since the preview (row " + was.rowNumber()
-                        + "); upload the file again");
-            }
-        }
-    }
-
-    private CommitResult previouslyCommitted(ImportHeader h) {
-        JsonNode n = read(h.summaryJson());
-        return new CommitResult(h.id(), true, n.path("created").asInt(), n.path("enrolledExisting").asInt(),
-            n.path("skippedDuplicates").asInt(), n.path("skippedByResolution").asInt(), n.path("invalid").asInt(),
-            List.of());
-    }
-
-    private String json(Object value) {
-        try {
-            return mapper.writeValueAsString(value);
-        } catch (JacksonException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private JsonNode read(String json) {
-        try {
-            return mapper.readTree(json == null ? "{}" : json);
-        } catch (JacksonException e) {
-            throw new IllegalStateException(e);
         }
     }
 

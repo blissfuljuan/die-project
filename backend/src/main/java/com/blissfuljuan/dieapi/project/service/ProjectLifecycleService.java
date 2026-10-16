@@ -3,6 +3,7 @@ package com.blissfuljuan.dieapi.project.service;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -56,7 +57,7 @@ public class ProjectLifecycleService {
                     teamName = text(req.teamName(), "teamName", 100, true);
                 }
                 repo.updateDetails(projectId, title, description, teamName);
-                events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_UPDATED, "project", projectId.toString(), Map.of()));
+                events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_UPDATED, AuditResource.PROJECT, projectId.toString(), Map.of()));
                 return views.viewOf(projectId, role);
             });
     }
@@ -68,7 +69,7 @@ public class ProjectLifecycleService {
                 if (locked.project().status() != ProjectStatus.ARCHIVED) {
                     repo.setStatus(projectId, ProjectStatus.ARCHIVED);
                     repo.cancelAllPendingForProject(projectId);
-                    events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_ARCHIVED, "project", projectId.toString(), Map.of()));
+                    events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_ARCHIVED, AuditResource.PROJECT, projectId.toString(), Map.of()));
                 }
                 return views.viewOf(projectId, role);
             });

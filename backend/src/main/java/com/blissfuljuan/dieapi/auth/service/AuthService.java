@@ -2,6 +2,7 @@ package com.blissfuljuan.dieapi.auth.service;
 
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -44,17 +45,17 @@ public class AuthService {
                 UsernamePasswordAuthenticationToken.unauthenticated(identifier, password));
             AppUserDetails user = (AppUserDetails) authentication.getPrincipal();
             throttle.record(identifier, clientIp, true);
-            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.LOGIN_SUCCEEDED, "user", user.getId().toString(),
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.LOGIN_SUCCEEDED, AuditResource.USER, user.getId().toString(),
                 Map.of("ip", String.valueOf(clientIp))));
             return authentication;
         } catch (AuthenticationException e) {
             throttle.record(identifier, clientIp, false);
-            events.publishEvent(AuditEvent.of(null, AuditAction.LOGIN_FAILED, "auth", null, Map.of("ip", String.valueOf(clientIp))));
+            events.publishEvent(AuditEvent.of(null, AuditAction.LOGIN_FAILED, AuditResource.AUTH, null, Map.of("ip", String.valueOf(clientIp))));
             throw ApiException.unauthorized("INVALID_CREDENTIALS", "Invalid email or password");
         }
     }
 
     public void recordLogout(AppUserDetails user) {
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.LOGOUT, "user", user.getId().toString(), Map.of()));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.LOGOUT, AuditResource.USER, user.getId().toString(), Map.of()));
     }
 }
