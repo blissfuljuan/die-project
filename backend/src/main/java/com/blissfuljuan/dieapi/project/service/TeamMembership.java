@@ -2,6 +2,7 @@ package com.blissfuljuan.dieapi.project.service;
 
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.project.model.MemberRow;
 import com.blissfuljuan.dieapi.project.model.ProjectStatus;
@@ -53,13 +54,13 @@ public class TeamMembership {
         if (remaining.isEmpty()) {
             repo.setStatus(projectId, ProjectStatus.ARCHIVED);
             repo.cancelAllPendingForProject(projectId);
-            events.publishEvent(AuditEvent.of(actor, AuditAction.PROJECT_ARCHIVED_EMPTY, "project", projectId.toString(), Map.of("reason", reason)));
+            events.publishEvent(AuditEvent.of(actor, AuditAction.PROJECT_ARCHIVED_EMPTY, AuditResource.PROJECT, projectId.toString(), Map.of("reason", reason)));
             return;
         }
         if (wasRepresentative) {
             MemberRow successor = remaining.get(0); // list is ordered by first join
             changeRole(projectId, successor.userId(), TeamRole.REPRESENTATIVE, actor);
-            events.publishEvent(AuditEvent.of(actor, AuditAction.PROJECT_REPRESENTATIVE_SUCCEEDED, "project", projectId.toString(),
+            events.publishEvent(AuditEvent.of(actor, AuditAction.PROJECT_REPRESENTATIVE_SUCCEEDED, AuditResource.PROJECT, projectId.toString(),
                 Map.of("from", userId.toString(), "to", successor.userId().toString(), "reason", reason)));
         }
         repo.touch(projectId);

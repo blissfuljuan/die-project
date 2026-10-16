@@ -9,6 +9,7 @@ import com.blissfuljuan.dieapi.account.model.AccountStatus;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -86,7 +87,7 @@ public class InvitationService {
                     throw ApiException.conflict("TEAM_FULL", "The team is full (members plus pending invitations)");
                 }
                 UUID id = repo.insertInvitation(projectId, studentId, user.getId(), invitationDays);
-                events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_SENT, "project", projectId.toString(),
+                events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_SENT, AuditResource.PROJECT, projectId.toString(),
                     Map.of("invitationId", id.toString(), "studentId", studentId.toString())));
                 return repo.pendingInvitations(projectId).stream().filter(i -> i.id().equals(id)).findFirst().orElseThrow();
             });
@@ -102,7 +103,7 @@ public class InvitationService {
                     throw ApiException.conflict("INVITATION_NOT_PENDING", "The invitation is no longer pending");
                 }
                 repo.setInvitationStatus(invitationId, InvitationStatus.CANCELLED);
-                events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_CANCELLED, "project", projectId.toString(),
+                events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_CANCELLED, AuditResource.PROJECT, projectId.toString(),
                     Map.of("invitationId", invitationId.toString())));
                 return null;
             });
@@ -135,7 +136,7 @@ public class InvitationService {
         repo.setInvitationStatus(invitationId, InvitationStatus.ACCEPTED);
         repo.cancelPendingForUserInClass(classId, user.getId());
         repo.touch(projectId);
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_ACCEPTED, "project", projectId.toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_ACCEPTED, AuditResource.PROJECT, projectId.toString(),
             Map.of("invitationId", invitationId.toString())));
         return views.viewOf(projectId, ProjectRole.MEMBER);
     }
@@ -145,7 +146,7 @@ public class InvitationService {
         var inv = ownInvitation(user, invitationId, true); // takes no other lock, so no ordering issue
         requireStillValid(inv);
         repo.setInvitationStatus(invitationId, InvitationStatus.DECLINED);
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_DECLINED, "project", inv.projectId().toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_DECLINED, AuditResource.PROJECT, inv.projectId().toString(),
             Map.of("invitationId", invitationId.toString())));
     }
 

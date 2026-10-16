@@ -4,6 +4,7 @@ import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -85,7 +86,7 @@ public class ProjectMembershipService {
                 details.put("before", current.keySet().stream().map(UUID::toString).toList());
                 details.put("after", desired.stream().map(UUID::toString).toList());
                 details.put("sizeException", exception);
-                events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_MEMBERS_SET, "project", projectId.toString(), details));
+                events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_MEMBERS_SET, AuditResource.PROJECT, projectId.toString(), details));
                 return views.viewOf(projectId, ProjectRole.STAFF);
             });
     }
@@ -117,7 +118,7 @@ public class ProjectMembershipService {
                     if (old != null) team.changeRole(projectId, old.userId(), TeamRole.MEMBER, user.getId());
                     team.changeRole(projectId, studentId, TeamRole.REPRESENTATIVE, user.getId());
                     repo.touch(projectId);
-                    events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_REPRESENTATIVE_CHANGED, "project", projectId.toString(),
+                    events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_REPRESENTATIVE_CHANGED, AuditResource.PROJECT, projectId.toString(),
                         Map.of("from", old == null ? "" : old.userId().toString(), "to", studentId.toString())));
                 }
                 return views.viewOf(projectId, role);
@@ -141,7 +142,7 @@ public class ProjectMembershipService {
                 throw ApiException.forbidden("TEAM_CHANGES_NOT_ALLOWED", "Your instructor does not allow students to change teams");
             }
             team.remove(projectId, user.getId(), user.getId(), "left team");
-            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_MEMBER_LEFT, "project", projectId.toString(), Map.of()));
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_MEMBER_LEFT, AuditResource.PROJECT, projectId.toString(), Map.of()));
             return null;
         });
     }

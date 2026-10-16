@@ -12,6 +12,7 @@ import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.account.service.TempCredentialService;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -83,7 +84,7 @@ public class ClassEnrollmentService {
         if (outcome == EnrollmentRules.Outcome.ALREADY_ENROLLED) {
             throw ApiException.conflict("ALREADY_ENROLLED", "Student is already enrolled in this class");
         }
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_ENROLLED, "class", classId.toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_ENROLLED, AuditResource.CLASS, classId.toString(),
             Map.of("studentId", student.id().toString(), "reinstated", outcome == EnrollmentRules.Outcome.REINSTATED)));
     }
 
@@ -106,7 +107,7 @@ public class ClassEnrollmentService {
                 "The account is already activated; use password reset instead");
         }
         var issued = tempCredentials.issue(studentId, user.getId());
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEMP_CREDENTIAL_REISSUED, "user", studentId.toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEMP_CREDENTIAL_REISSUED, AuditResource.USER, studentId.toString(),
             Map.of("classId", classId.toString())));
         return new TemporaryCredentialView(issued.secret(), issued.expiresAt());
     }
@@ -122,6 +123,6 @@ public class ClassEnrollmentService {
         repo.removeEnrollment(classId, studentId);
         // A student who is no longer enrolled cannot stay on a team or hold team invitations.
         teamMembership.onStudentRemovedFromClass(classId, studentId, user.getId());
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_REMOVED, "class", classId.toString(), Map.of("studentId", studentId.toString())));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_REMOVED, AuditResource.CLASS, classId.toString(), Map.of("studentId", studentId.toString())));
     }
 }

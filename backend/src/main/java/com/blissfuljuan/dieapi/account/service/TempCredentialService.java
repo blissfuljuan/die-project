@@ -1,7 +1,7 @@
 package com.blissfuljuan.dieapi.account.service;
 
+import com.blissfuljuan.dieapi.account.repository.TempCredentialRepository;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -32,13 +32,13 @@ public class TempCredentialService {
     private static final int LENGTH = 14;
 
     private final SecureRandom random = new SecureRandom();
-    private final JdbcClient jdbc;
+    private final TempCredentialRepository repository;
     private final PasswordEncoder encoder;
     private final int validDays;
 
-    public TempCredentialService(JdbcClient jdbc, PasswordEncoder encoder,
+    public TempCredentialService(TempCredentialRepository repository, PasswordEncoder encoder,
                                  @Value("${die.auth.temp-credential-days:14}") int validDays) {
-        this.jdbc = jdbc;
+        this.repository = repository;
         this.encoder = encoder;
         this.validDays = validDays;
     }
@@ -67,11 +67,7 @@ public class TempCredentialService {
     }
 
     public void invalidateActive(UUID userId, String reason) {
-        jdbc.sql("""
-                UPDATE temp_credential SET invalidated_at = now(), invalid_reason = :r
-                WHERE user_id = :u AND invalidated_at IS NULL
-                """)
-            .param("u", userId).param("r", reason).update();
+        repository.invalidateActive(userId, reason);
     }
 
     /** A random secret from a CSPRNG (about 80 bits). */
@@ -84,13 +80,7 @@ public class TempCredentialService {
     }
 
     private Issued store(UUID userId, String secret, String hash, UUID createdBy) {
-        OffsetDateTime expires = jdbc.sql("""
-                INSERT INTO temp_credential (user_id, secret_hash, expires_at, created_by)
-                VALUES (:u, :h, now() + make_interval(days => :d), :by)
-                RETURNING expires_at
-                """)
-            .param("u", userId).param("h", hash).param("d", validDays).param("by", createdBy)
-            .query((rs, n) -> rs.getObject("expires_at", OffsetDateTime.class)).single();
+        OffsetDateTime expires = repository.insert(userId, hash, validDays, createdBy);
         return new Issued(secret, expires);
     }
 }

@@ -24,7 +24,7 @@ public class AuditEventListener {
 
     @EventListener
     public void on(AuditEvent event) {
-        audit.record(event.actorUserId(), event.action().name(), event.resourceType(), event.resourceId(),
+        audit.record(event.actorUserId(), event.action().name(), event.resource().value(), event.resourceId(),
             event.details());
     }
 }

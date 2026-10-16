@@ -11,6 +11,7 @@ import com.blissfuljuan.dieapi.account.view.UserPage;
 import com.blissfuljuan.dieapi.account.view.UserView;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
 import org.springframework.stereotype.Service;
@@ -50,7 +51,7 @@ public class AccountService {
 
         UUID id = repo.insert(role, studentNumber, last, first, blankToNull(req.middleName()), email, actor);
         var issued = credentials.issue(id, actor);
-        events.publishEvent(AuditEvent.of(actor, AuditAction.USER_CREATED, "user", id.toString(), Map.of("role", role.name())));
+        events.publishEvent(AuditEvent.of(actor, AuditAction.USER_CREATED, AuditResource.USER, id.toString(), Map.of("role", role.name())));
         return new AccountChange(repo.find(id).orElseThrow(), issued.secret(), issued.expiresAt());
     }
 
@@ -95,11 +96,11 @@ public class AccountService {
 
         repo.updateProfile(id, role, studentNumber, last, first, middle, email);
         if (roleChanged) {
-            events.publishEvent(AuditEvent.of(actor, AuditAction.ROLE_CHANGED, "user", id.toString(), Map.of("from", cur.role().name(), "to", role.name())));
+            events.publishEvent(AuditEvent.of(actor, AuditAction.ROLE_CHANGED, AuditResource.USER, id.toString(), Map.of("from", cur.role().name(), "to", role.name())));
             sessions.revokeAllAfterCommit(id); // authorities are cached in the session
         }
         if (!changed.isEmpty()) {
-            events.publishEvent(AuditEvent.of(actor, AuditAction.USER_UPDATED, "user", id.toString(), Map.of("fields", changed)));
+            events.publishEvent(AuditEvent.of(actor, AuditAction.USER_UPDATED, AuditResource.USER, id.toString(), Map.of("fields", changed)));
         }
         return repo.find(id).orElseThrow();
     }
@@ -112,7 +113,7 @@ public class AccountService {
             repo.setStatus(id, AccountStatus.DEACTIVATED);
             credentials.invalidateActive(id, "LOCKED");
             sessions.revokeAllAfterCommit(id);
-            events.publishEvent(AuditEvent.of(actor, AuditAction.USER_DEACTIVATED, "user", id.toString(), Map.of("previousStatus", cur.status().name())));
+            events.publishEvent(AuditEvent.of(actor, AuditAction.USER_DEACTIVATED, AuditResource.USER, id.toString(), Map.of("previousStatus", cur.status().name())));
         }
         return repo.find(id).orElseThrow();
     }
@@ -128,7 +129,7 @@ public class AccountService {
         AccountStatus resulting = canLogIn ? AccountStatus.ACTIVE : AccountStatus.PENDING_ACTIVATION;
         repo.setStatus(id, resulting);
         TempCredentialService.Issued issued = canLogIn ? null : credentials.issue(id, actor);
-        events.publishEvent(AuditEvent.of(actor, AuditAction.USER_ACTIVATED, "user", id.toString(),
+        events.publishEvent(AuditEvent.of(actor, AuditAction.USER_ACTIVATED, AuditResource.USER, id.toString(),
             Map.of("resultingStatus", resulting.name())));
         return new AccountChange(repo.find(id).orElseThrow(),
             issued == null ? null : issued.secret(), issued == null ? null : issued.expiresAt());
@@ -148,7 +149,7 @@ public class AccountService {
         repo.clearPasswordAndSetPending(id);
         var issued = credentials.issue(id, actor);
         sessions.revokeAllAfterCommit(id);
-        events.publishEvent(AuditEvent.of(actor, AuditAction.CREDENTIALS_RESET, "user", id.toString(), Map.of("previousStatus", cur.status().name())));
+        events.publishEvent(AuditEvent.of(actor, AuditAction.CREDENTIALS_RESET, AuditResource.USER, id.toString(), Map.of("previousStatus", cur.status().name())));
         return new AccountChange(repo.find(id).orElseThrow(), issued.secret(), issued.expiresAt());
     }
 

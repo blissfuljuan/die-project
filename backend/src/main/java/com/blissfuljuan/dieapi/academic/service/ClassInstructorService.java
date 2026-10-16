@@ -4,6 +4,7 @@ import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -41,7 +42,7 @@ public class ClassInstructorService {
         requireAssignable(instructors);
         List<UUID> before = repo.instructorIds(classId);
         repo.replaceInstructors(classId, instructors);
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_INSTRUCTORS_CHANGED, "class", classId.toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_INSTRUCTORS_CHANGED, AuditResource.CLASS, classId.toString(),
             Map.of("before", before.stream().map(UUID::toString).toList(),
                 "after", instructors.stream().map(UUID::toString).toList())));
     }

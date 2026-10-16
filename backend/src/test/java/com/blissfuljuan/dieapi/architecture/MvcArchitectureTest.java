@@ -132,12 +132,12 @@ class MvcArchitectureTest {
         .should().beAnnotatedWith(Transactional.class);
 
     /**
-     * Authorization services keep SQL in {@code access.repository}. Scoped to the access module because other
-     * services (auth, account provisioning, roster) still use JdbcClient directly; widen this rule as they migrate.
+     * Services keep SQL in repositories: no JdbcClient/DataSource in any {@code ..service..} package. Wiring
+     * beans that need a JdbcClient (security filters) live in {@code config}, not in a service package.
      */
     @ArchTest
-    static final ArchRule accessServicesDoNotUseJdbc = noClasses()
-        .that().resideInAPackage("..access.service..")
+    static final ArchRule servicesDoNotUseJdbc = noClasses()
+        .that().resideInAPackage("..service..")
         .should().dependOnClassesThat().resideInAnyPackage("org.springframework.jdbc..", "javax.sql..");
 
     // ---- what controllers hand back ----
