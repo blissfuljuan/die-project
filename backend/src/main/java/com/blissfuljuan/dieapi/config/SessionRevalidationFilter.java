@@ -1,5 +1,6 @@
 package com.blissfuljuan.dieapi.config;
 
+import com.blissfuljuan.dieapi.account.model.AccountStatus;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -52,7 +53,7 @@ public class SessionRevalidationFilter extends OncePerRequestFilter {
     private boolean stillValid(AppUserDetails user) {
         return jdbc.sql("SELECT status, role FROM app_user WHERE id = :id")
             .param("id", user.getId())
-            .query((rs, n) -> "ACTIVE".equals(rs.getString("status")) && user.getRole().equals(rs.getString("role")))
+            .query((rs, n) -> AccountStatus.ACTIVE.name().equals(rs.getString("status")) && user.getRole().equals(rs.getString("role")))
             .optional()
             .orElse(false);
     }

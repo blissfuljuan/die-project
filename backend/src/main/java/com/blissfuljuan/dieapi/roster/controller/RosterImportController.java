@@ -2,6 +2,7 @@ package com.blissfuljuan.dieapi.roster.controller;
 
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.roster.model.ResolutionChange;
+import com.blissfuljuan.dieapi.roster.service.RosterImportQueryService;
 import com.blissfuljuan.dieapi.roster.service.RosterImportService;
 import com.blissfuljuan.dieapi.roster.view.CommitResult;
 import com.blissfuljuan.dieapi.roster.view.ImportDetail;
@@ -15,7 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.server.ResponseStatusException;
+import com.blissfuljuan.dieapi.common.exception.ApiException;
 
 import java.io.IOException;
 import java.net.URI;
@@ -30,9 +31,11 @@ public class RosterImportController {
     public record ResolutionsRequest(@NotEmpty List<@Valid ResolutionChange> resolutions) {}
 
     private final RosterImportService imports;
+    private final RosterImportQueryService queries;
 
-    public RosterImportController(RosterImportService imports) {
+    public RosterImportController(RosterImportService imports, RosterImportQueryService queries) {
         this.imports = imports;
+        this.queries = queries;
     }
 
     @PostMapping(path = "/classes/{classId}/roster-imports", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -43,7 +46,7 @@ public class RosterImportController {
         try {
             bytes = file.getBytes();
         } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The upload could not be read");
+            throw ApiException.badRequest("UPLOAD_UNREADABLE", "The upload could not be read");
         }
         ImportView preview = imports.upload(user, classId, file.getOriginalFilename(), bytes);
         return ResponseEntity.created(URI.create("/api/v1/roster-imports/" + preview.id())).body(preview);
@@ -51,7 +54,7 @@ public class RosterImportController {
 
     @GetMapping("/classes/{classId}/roster-imports")
     public List<ImportView> list(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID classId) {
-        return imports.list(user, classId);
+        return queries.list(user, classId);
     }
 
     @GetMapping("/roster-imports/{id}")
@@ -59,7 +62,7 @@ public class RosterImportController {
                                @RequestParam(required = false) String action,
                                @RequestParam(defaultValue = "0") int page,
                                @RequestParam(defaultValue = "100") int size) {
-        return imports.detail(user, id, action, page, size);
+        return queries.detail(user, id, action, page, size);
     }
 
     @PutMapping("/roster-imports/{id}/resolutions")

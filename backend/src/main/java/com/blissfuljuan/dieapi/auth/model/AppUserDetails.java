@@ -1,5 +1,7 @@
 package com.blissfuljuan.dieapi.auth.model;
 
+import com.blissfuljuan.dieapi.account.model.AccountStatus;
+import com.blissfuljuan.dieapi.account.model.UserRole;
 import org.springframework.security.core.CredentialsContainer;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -51,8 +53,10 @@ public class AppUserDetails implements UserDetails, CredentialsContainer, Serial
     public String getFirstName() { return firstName; }
     public String getLastName() { return lastName; }
     public String getRole() { return role; }
+    /** Typed role for application code; {@link #getRole()} stays a String for Spring Security and the serialized session. */
+    public UserRole role() { return UserRole.valueOf(role); }
     public String getStatus() { return status; }
-    public boolean isActive() { return "ACTIVE".equals(status); }
+    public boolean isActive() { return AccountStatus.ACTIVE.name().equals(status); }
 
     @Override public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority("ROLE_" + role));

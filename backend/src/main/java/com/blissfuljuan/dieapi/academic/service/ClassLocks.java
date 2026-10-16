@@ -1,0 +1,37 @@
+package com.blissfuljuan.dieapi.academic.service;
+
+import com.blissfuljuan.dieapi.academic.model.ClassStatus;
+import com.blissfuljuan.dieapi.academic.model.LockedClass;
+import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
+import com.blissfuljuan.dieapi.access.service.AccessPolicy;
+import com.blissfuljuan.dieapi.common.exception.ApiException;
+import org.springframework.stereotype.Component;
+
+import java.util.UUID;
+
+/** Class row lock plus the archived-is-read-only rule; callers must already have passed AccessPolicy. */
+@Component
+public class ClassLocks {
+
+    private final ClassRepository repo;
+
+    public ClassLocks(ClassRepository repo) {
+        this.repo = repo;
+    }
+
+    public LockedClass lock(UUID classId) {
+        return repo.lock(classId).orElseThrow(AccessPolicy::classNotFound);
+    }
+
+    public LockedClass lockWritable(UUID classId) {
+        LockedClass cur = lock(classId);
+        assertWritable(cur.status());
+        return cur;
+    }
+
+    public static void assertWritable(ClassStatus status) {
+        if (status == ClassStatus.ARCHIVED) {
+            throw ApiException.conflict("CLASS_ARCHIVED", "The class is archived and read-only");
+        }
+    }
+}

@@ -1,16 +1,20 @@
 package com.blissfuljuan.dieapi.roster.service;
 
 import com.blissfuljuan.dieapi.academic.service.EnrollmentRules;
+import com.blissfuljuan.dieapi.academic.model.EnrollmentStatus;
+import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
+import com.blissfuljuan.dieapi.roster.model.ConflictKind;
 import com.blissfuljuan.dieapi.roster.model.ExistingUser;
 import com.blissfuljuan.dieapi.roster.model.NormalizedRow;
+import com.blissfuljuan.dieapi.roster.model.RowOutcome;
 import com.blissfuljuan.dieapi.roster.model.StoredRow;
 import com.blissfuljuan.dieapi.roster.repository.RosterImportRepository;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 
-import static com.blissfuljuan.dieapi.roster.model.RosterRules.*;
+import static com.blissfuljuan.dieapi.roster.model.RowOutcome.*;
 
 /**
  * Decides what each roster row means against the current database and the rows before it, FOR A GIVEN
@@ -40,7 +44,7 @@ public class RosterAnalyzer {
     }
 
     public List<StoredRow> classify(UUID classId, List<NormalizedRow> rows, AppUserDetails caller) {
-        boolean admin = "ADMIN".equals(caller.getRole());
+        boolean admin = caller.role() == UserRole.ADMIN;
         Set<String> numbers = new HashSet<>();
         for (NormalizedRow r : rows) {
             if (r.invalidReason() == null) numbers.add(lower(r.studentNumber()));
@@ -48,7 +52,7 @@ public class RosterAnalyzer {
         Map<String, ExistingUser> existingByNumber = repo.usersByStudentNumber(numbers);
         Set<UUID> known = admin ? Set.of()
             : repo.studentsKnownToInstructor(caller.getId(), existingByNumber.values().stream().map(ExistingUser::id).toList());
-        Map<UUID, String> enrollments = repo.enrollmentStatuses(classId);
+        Map<UUID, EnrollmentStatus> enrollments = repo.enrollmentStatuses(classId);
 
         Map<String, NormalizedRow> firstByNumber = new HashMap<>();
         List<StoredRow> out = new ArrayList<>(rows.size());
@@ -64,7 +68,7 @@ public class RosterAnalyzer {
                 if (sameName(prior.lastName(), prior.firstName(), r.lastName(), r.firstName())) {
                     out.add(stored(r, SKIP_DUPLICATE, null, "Repeated from row " + prior.rowNumber(), null));
                 } else {
-                    out.add(stored(r, CONFLICT, "ID_REPEATED_WITH_DIFFERENT_NAME",
+                    out.add(stored(r, CONFLICT, ConflictKind.ID_REPEATED_WITH_DIFFERENT_NAME,
                         "Same Student ID as row " + prior.rowNumber() + " but a different name", null));
                 }
                 continue;
@@ -82,29 +86,29 @@ public class RosterAnalyzer {
     }
 
     private StoredRow classifyExisting(NormalizedRow r, ExistingUser existing, boolean admin, UUID callerId,
-                                       boolean knownToCaller, Map<UUID, String> enrollments) {
+                                       boolean knownToCaller, Map<UUID, EnrollmentStatus> enrollments) {
         boolean usable = EnrollmentRules.mayEnroll(admin, callerId, existing.role(), existing.status(),
             existing.createdBy(), knownToCaller);
         if (!usable) {
-            return stored(r, CONFLICT, "ID_UNAVAILABLE", UNAVAILABLE_MESSAGE, null);
+            return stored(r, CONFLICT, ConflictKind.ID_UNAVAILABLE, UNAVAILABLE_MESSAGE, null);
         }
         if (!sameName(existing.lastName(), existing.firstName(), r.lastName(), r.firstName())) {
             if (admin || knownToCaller) {
-                return stored(r, CONFLICT, "ID_NAME_MISMATCH",
+                return stored(r, CONFLICT, ConflictKind.ID_NAME_MISMATCH,
                     "This Student ID is already registered under a different name", existing.id());
             }
-            return stored(r, CONFLICT, "ID_UNAVAILABLE", UNAVAILABLE_MESSAGE, null);
+            return stored(r, CONFLICT, ConflictKind.ID_UNAVAILABLE, UNAVAILABLE_MESSAGE, null);
         }
-        if ("ENROLLED".equals(enrollments.get(existing.id()))) {
+        if (enrollments.get(existing.id()) == EnrollmentStatus.ENROLLED) {
             return stored(r, SKIP_DUPLICATE, null, "Already enrolled in this class", existing.id());
         }
-        String note = "REMOVED".equals(enrollments.get(existing.id()))
+        String note = enrollments.get(existing.id()) == EnrollmentStatus.REMOVED
             ? "Existing account; previously removed from this class, will be re-enrolled"
             : "Existing account; will be enrolled";
         return stored(r, MATCH, null, note, existing.id());
     }
 
-    private static StoredRow stored(NormalizedRow r, String action, String kind, String message, UUID matchedUser) {
+    private static StoredRow stored(NormalizedRow r, RowOutcome action, ConflictKind kind, String message, UUID matchedUser) {
         return new StoredRow(r.rowNumber(), r.studentNumber(), r.lastName(), r.firstName(), r.middleName(),
             r.email(), r.program(), r.section(), action, kind, null, message, matchedUser);
     }

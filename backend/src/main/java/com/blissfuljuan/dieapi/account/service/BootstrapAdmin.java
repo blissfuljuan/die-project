@@ -1,6 +1,8 @@
 package com.blissfuljuan.dieapi.account.service;
 
-import com.blissfuljuan.dieapi.audit.service.AuditService;
+import com.blissfuljuan.dieapi.audit.model.AuditAction;
+import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,16 +29,16 @@ public class BootstrapAdmin implements ApplicationRunner {
 
     private final JdbcClient jdbc;
     private final PasswordEncoder encoder;
-    private final AuditService audit;
+    private final ApplicationEventPublisher events;
     private final String email;
     private final String password;
 
-    public BootstrapAdmin(JdbcClient jdbc, PasswordEncoder encoder, AuditService audit,
+    public BootstrapAdmin(JdbcClient jdbc, PasswordEncoder encoder, ApplicationEventPublisher events,
                           @Value("${die.bootstrap.admin-email:}") String email,
                           @Value("${die.bootstrap.admin-password:}") String password) {
         this.jdbc = jdbc;
         this.encoder = encoder;
-        this.audit = audit;
+        this.events = events;
         this.email = email;
         this.password = password;
     }
@@ -62,7 +64,7 @@ public class BootstrapAdmin implements ApplicationRunner {
             .param("email", email.trim().toLowerCase(Locale.ROOT))
             .param("hash", encoder.encode(password))
             .query(UUID.class).single();
-        audit.record(null, "BOOTSTRAP_ADMIN_CREATED", "user", id.toString(), Map.of());
+        events.publishEvent(AuditEvent.of(null, AuditAction.BOOTSTRAP_ADMIN_CREATED, "user", id.toString(), Map.of()));
         log.warn("Bootstrap administrator created. Remove DIE_BOOTSTRAP_ADMIN_* from the environment now.");
     }
 }

@@ -1,6 +1,8 @@
 package com.blissfuljuan.dieapi.auth.service;
 
-import com.blissfuljuan.dieapi.audit.service.AuditService;
+import com.blissfuljuan.dieapi.audit.model.AuditAction;
+import com.blissfuljuan.dieapi.audit.model.AuditEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -21,12 +23,12 @@ public class AuthService {
 
     private final AuthenticationManager authenticationManager;
     private final LoginThrottleService throttle;
-    private final AuditService audit;
+    private final ApplicationEventPublisher events;
 
-    public AuthService(AuthenticationManager authenticationManager, LoginThrottleService throttle, AuditService audit) {
+    public AuthService(AuthenticationManager authenticationManager, LoginThrottleService throttle, ApplicationEventPublisher events) {
         this.authenticationManager = authenticationManager;
         this.throttle = throttle;
-        this.audit = audit;
+        this.events = events;
     }
 
     /**
@@ -42,17 +44,17 @@ public class AuthService {
                 UsernamePasswordAuthenticationToken.unauthenticated(identifier, password));
             AppUserDetails user = (AppUserDetails) authentication.getPrincipal();
             throttle.record(identifier, clientIp, true);
-            audit.record(user.getId(), "LOGIN_SUCCEEDED", "user", user.getId().toString(),
-                Map.of("ip", String.valueOf(clientIp)));
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.LOGIN_SUCCEEDED, "user", user.getId().toString(),
+                Map.of("ip", String.valueOf(clientIp))));
             return authentication;
         } catch (AuthenticationException e) {
             throttle.record(identifier, clientIp, false);
-            audit.record(null, "LOGIN_FAILED", "auth", null, Map.of("ip", String.valueOf(clientIp)));
+            events.publishEvent(AuditEvent.of(null, AuditAction.LOGIN_FAILED, "auth", null, Map.of("ip", String.valueOf(clientIp))));
             throw ApiException.unauthorized("INVALID_CREDENTIALS", "Invalid email or password");
         }
     }
 
     public void recordLogout(AppUserDetails user) {
-        audit.record(user.getId(), "LOGOUT", "user", user.getId().toString(), Map.of());
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.LOGOUT, "user", user.getId().toString(), Map.of()));
     }
 }

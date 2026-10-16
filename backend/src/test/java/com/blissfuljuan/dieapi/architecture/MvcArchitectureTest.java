@@ -46,6 +46,14 @@ class MvcArchitectureTest {
     private static final Set<String> LAYERS = Set.of("controller", "view", "model", "service", "repository");
     private static final Set<String> UNLAYERED_PACKAGES = Set.of("config", "common");
 
+    // ---- auditing goes through events ----
+
+    @ArchTest
+    static final ArchRule servicesOutsideAuditPublishEventsInsteadOfCallingAuditService = noClasses()
+        .that().resideOutsideOfPackage(BASE + ".audit..")
+        .should().dependOnClassesThat().haveFullyQualifiedName(BASE + ".audit.service.AuditService")
+        .because("audit rows are published as AuditEvent and written by AuditEventListener");
+
     // ---- structure ----
 
     @ArchTest
@@ -122,6 +130,15 @@ class MvcArchitectureTest {
     static final ArchRule transactionsAreManagedByTheModelLayerNotTheControllers = noMethods()
         .that().areDeclaredInClassesThat().resideInAPackage("..controller..")
         .should().beAnnotatedWith(Transactional.class);
+
+    /**
+     * Authorization services keep SQL in {@code access.repository}. Scoped to the access module because other
+     * services (auth, account provisioning, roster) still use JdbcClient directly; widen this rule as they migrate.
+     */
+    @ArchTest
+    static final ArchRule accessServicesDoNotUseJdbc = noClasses()
+        .that().resideInAPackage("..access.service..")
+        .should().dependOnClassesThat().resideInAnyPackage("org.springframework.jdbc..", "javax.sql..");
 
     // ---- what controllers hand back ----
 

@@ -133,7 +133,7 @@ class LockingAndRaceIntegrationTest extends PostgresIntegrationTest {
     void staffRemovingTheInviteeWhileTheyAcceptEndsCleanlyNotInADeadlock() throws Exception {
         CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
         Future<?> holder = holdClassLock(() -> {
-            // what ClassService.unenroll does while holding the class lock
+            // what ClassEnrollmentService.unenroll does while holding the class lock
             jdbc.update("UPDATE enrollment SET status = 'REMOVED', removed_at = now() WHERE class_id = ? AND student_id = ?", classId, invitee);
             jdbc.update("UPDATE team_invitation SET status = 'CANCELLED' WHERE id = ?", invitationId);
         }, locked, release);

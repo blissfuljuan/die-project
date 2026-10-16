@@ -1,6 +1,9 @@
 package com.blissfuljuan.dieapi.academic.service;
 
+import com.blissfuljuan.dieapi.academic.model.EnrollmentStatus;
 import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
+import com.blissfuljuan.dieapi.account.model.AccountStatus;
+import com.blissfuljuan.dieapi.account.model.UserRole;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -24,7 +27,7 @@ public class EnrollmentRules {
 
     public Outcome enroll(UUID classId, UUID studentId, String program, String section) {
         var existing = repo.enrollmentStatus(classId, studentId);
-        if (existing.isPresent() && "ENROLLED".equals(existing.get())) {
+        if (existing.isPresent() && existing.get() == EnrollmentStatus.ENROLLED) {
             return Outcome.ALREADY_ENROLLED;
         }
         if (existing.isPresent()) {
@@ -43,10 +46,10 @@ public class EnrollmentRules {
      *    never-activated students the instructor created or already teaches. Claiming somebody else's
      *    pending account would let the instructor re-issue its temporary credential and take it over.
      */
-    public static boolean mayEnroll(boolean callerIsAdmin, UUID callerId, String studentRole, String studentStatus,
+    public static boolean mayEnroll(boolean callerIsAdmin, UUID callerId, UserRole studentRole, AccountStatus studentStatus,
                                     UUID createdBy, boolean knownToCaller) {
-        if (!"STUDENT".equals(studentRole) || "DEACTIVATED".equals(studentStatus)) return false;
-        if (callerIsAdmin || "ACTIVE".equals(studentStatus)) return true;
+        if (studentRole != UserRole.STUDENT || studentStatus == AccountStatus.DEACTIVATED) return false;
+        if (callerIsAdmin || studentStatus == AccountStatus.ACTIVE) return true;
         return knownToCaller || callerId.equals(createdBy);
     }
 }

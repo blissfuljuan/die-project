@@ -2,8 +2,12 @@ package com.blissfuljuan.dieapi.project.repository;
 
 import com.blissfuljuan.dieapi.access.model.SqlScope;
 import com.blissfuljuan.dieapi.project.model.InvitationRow;
+import com.blissfuljuan.dieapi.project.model.InvitationStatus;
 import com.blissfuljuan.dieapi.project.model.MemberRow;
+import com.blissfuljuan.dieapi.project.model.ProjectKind;
 import com.blissfuljuan.dieapi.project.model.ProjectRow;
+import com.blissfuljuan.dieapi.project.model.ProjectStatus;
+import com.blissfuljuan.dieapi.project.model.TeamRole;
 import com.blissfuljuan.dieapi.project.view.Classmate;
 import com.blissfuljuan.dieapi.project.view.HistoryEntry;
 import com.blissfuljuan.dieapi.project.view.InvitationView;
@@ -29,18 +33,18 @@ public class ProjectRepository {
 
     private static ProjectRow mapProject(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new ProjectRow(rs.getObject("id", UUID.class), rs.getObject("class_id", UUID.class),
-            rs.getString("kind"), rs.getString("title"), rs.getString("description"), rs.getString("team_name"),
-            rs.getString("status"), rs.getLong("version"), rs.getObject("created_at", OffsetDateTime.class));
+            ProjectKind.valueOf(rs.getString("kind")), rs.getString("title"), rs.getString("description"),
+            rs.getString("team_name"), ProjectStatus.valueOf(rs.getString("status")), rs.getLong("version"), rs.getObject("created_at", OffsetDateTime.class));
     }
 
     // ---- projects ----
 
-    public UUID insert(UUID classId, String kind, String title, String description, String teamName, UUID createdBy) {
+    public UUID insert(UUID classId, ProjectKind kind, String title, String description, String teamName, UUID createdBy) {
         return jdbc.sql("""
                 INSERT INTO project (class_id, title, description, kind, team_name, created_by)
                 VALUES (:c, :t, :d, :k, :n, :by) RETURNING id
                 """)
-            .param("c", classId).param("t", title).param("d", description).param("k", kind)
+            .param("c", classId).param("t", title).param("d", description).param("k", kind.name())
             .param("n", teamName).param("by", createdBy).query(UUID.class).single();
     }
 
@@ -73,9 +77,9 @@ public class ProjectRepository {
             .param("id", id).param("t", title).param("d", description).param("n", teamName).update();
     }
 
-    public void setStatus(UUID id, String status) {
+    public void setStatus(UUID id, ProjectStatus status) {
         jdbc.sql("UPDATE project SET status = :s, updated_at = now(), version = version + 1 WHERE id = :id")
-            .param("id", id).param("s", status).update();
+            .param("id", id).param("s", status.name()).update();
     }
 
     /** Membership changes bump the version so concurrent edits based on older state are rejected. */
@@ -121,12 +125,12 @@ public class ProjectRepository {
 
     private static MemberRow mapMember(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new MemberRow(rs.getObject("user_id", UUID.class), rs.getString("first_name"), rs.getString("last_name"),
-            rs.getString("student_number"), rs.getString("role"), rs.getObject("first_joined", OffsetDateTime.class));
+            rs.getString("student_number"), TeamRole.valueOf(rs.getString("role")), rs.getObject("first_joined", OffsetDateTime.class));
     }
 
-    public void insertMember(UUID projectId, UUID userId, String role, UUID changedBy) {
+    public void insertMember(UUID projectId, UUID userId, TeamRole role, UUID changedBy) {
         jdbc.sql("INSERT INTO project_member (project_id, user_id, role, changed_by) VALUES (:p, :u, :r, :by)")
-            .param("p", projectId).param("u", userId).param("r", role).param("by", changedBy).update();
+            .param("p", projectId).param("u", userId).param("r", role.name()).param("by", changedBy).update();
     }
 
     public int endMember(UUID projectId, UUID userId, UUID changedBy) {
@@ -199,13 +203,13 @@ public class ProjectRepository {
             .param("id", id)
             .query((rs, n) -> new InvitationRow(rs.getObject("id", UUID.class), rs.getObject("project_id", UUID.class),
                 rs.getObject("invited_user_id", UUID.class), rs.getObject("invited_by", UUID.class),
-                rs.getString("status"), rs.getObject("expires_at", OffsetDateTime.class)))
+                InvitationStatus.valueOf(rs.getString("status")), rs.getObject("expires_at", OffsetDateTime.class)))
             .optional();
     }
 
-    public void setInvitationStatus(UUID id, String status) {
+    public void setInvitationStatus(UUID id, InvitationStatus status) {
         jdbc.sql("UPDATE team_invitation SET status = :s, responded_at = now() WHERE id = :id AND status = 'PENDING'")
-            .param("id", id).param("s", status).update();
+            .param("id", id).param("s", status.name()).update();
     }
 
     /** Live (pending, unexpired) invitations of a project. */
