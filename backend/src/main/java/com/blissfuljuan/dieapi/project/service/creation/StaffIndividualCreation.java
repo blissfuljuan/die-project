@@ -3,6 +3,7 @@ package com.blissfuljuan.dieapi.project.service.creation;
 import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.ProjectCreation;
 import com.blissfuljuan.dieapi.project.model.ProjectKind;
 import com.blissfuljuan.dieapi.project.model.TeamRole;
@@ -36,7 +37,7 @@ public class StaffIndividualCreation implements ProjectCreationStrategy {
     public UUID create(ProjectCreation c) {
         UUID studentId = c.request().studentId();
         if (studentId == null) {
-            throw ApiException.badRequest("STUDENT_REQUIRED", "studentId is required for an individual project");
+            throw ApiException.badRequest(ErrorCode.STUDENT_REQUIRED, "studentId is required for an individual project");
         }
         validation.assertEnrolledAndFree(c.classId(), studentId, null);
         UUID projectId = repo.insert(c.classId(), c.kind(), c.title(), c.description(), null, c.actor().getId());

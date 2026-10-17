@@ -130,4 +130,13 @@ public class AccountRepository {
             .param("hash", passwordHash)
             .query(UUID.class).single();
     }
+
+    /** True when the account exists, is ACTIVE and still has the given role (session revalidation, one PK lookup). */
+    public boolean isActiveWithRole(UUID id, String role) {
+        return jdbc.sql("SELECT status, role FROM app_user WHERE id = :id")
+            .param("id", id)
+            .query((rs, n) -> AccountStatus.ACTIVE.name().equals(rs.getString("status")) && role.equals(rs.getString("role")))
+            .optional()
+            .orElse(false);
+    }
 }

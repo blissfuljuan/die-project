@@ -13,6 +13,7 @@ import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.InvitationRow;
 import com.blissfuljuan.dieapi.project.model.InvitationStatus;
 import com.blissfuljuan.dieapi.project.model.LockedProject;
@@ -65,26 +66,26 @@ public class InvitationService {
         return mutation.run(projectId, Requires.ACTIVE_PROJECT, () -> policy.requireProjectEdit(user, projectId),
             null, (locked, role) -> {
                 if (locked.project().kind() != ProjectKind.TEAM) {
-                    throw ApiException.conflict("INVITATIONS_TEAM_ONLY", "Only team projects have invitations");
+                    throw ApiException.conflict(ErrorCode.INVITATIONS_TEAM_ONLY, "Only team projects have invitations");
                 }
                 if (role == ProjectRole.REPRESENTATIVE && locked.cls().teamFormation() != TeamFormation.STUDENT_FORMED) {
-                    throw ApiException.forbidden("TEAMS_ASSIGNED_BY_INSTRUCTOR", "Teams are assigned by your instructor in this class");
+                    throw ApiException.forbidden(ErrorCode.TEAMS_ASSIGNED_BY_INSTRUCTOR, "Teams are assigned by your instructor in this class");
                 }
                 UUID classId = locked.project().classId();
-                if (studentId.equals(user.getId())) throw ApiException.badRequest("CANNOT_INVITE_SELF", "You cannot invite yourself");
+                if (studentId.equals(user.getId())) throw ApiException.badRequest(ErrorCode.CANNOT_INVITE_SELF, "You cannot invite yourself");
                 var student = classes.findStudentById(studentId)
                     .filter(s -> s.role() == UserRole.STUDENT && s.status() != AccountStatus.DEACTIVATED);
                 var enrollment = classes.enrollmentStatus(classId, studentId);
                 if (student.isEmpty() || enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED) {
                     // Same answer for unknown ids and students of other classes: no roster probing.
-                    throw ApiException.notFound("CLASSMATE_NOT_FOUND", "Classmate not found");
+                    throw ApiException.notFound(ErrorCode.CLASSMATE_NOT_FOUND, "Classmate not found");
                 }
                 if (repo.activeProjectOf(classId, studentId).isPresent()) {
-                    throw ApiException.conflict("STUDENT_ALREADY_IN_PROJECT", "The student already belongs to a project in this class");
+                    throw ApiException.conflict(ErrorCode.STUDENT_ALREADY_IN_PROJECT, "The student already belongs to a project in this class");
                 }
                 int taken = repo.currentMembers(projectId).size() + repo.livePendingCount(projectId);
                 if (taken >= locked.cls().teamMaxSize()) {
-                    throw ApiException.conflict("TEAM_FULL", "The team is full (members plus pending invitations)");
+                    throw ApiException.conflict(ErrorCode.TEAM_FULL, "The team is full (members plus pending invitations)");
                 }
                 UUID id = repo.insertInvitation(projectId, studentId, user.getId(), invitationDays);
                 events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_SENT, AuditResource.PROJECT, projectId.toString(),
@@ -98,9 +99,9 @@ public class InvitationService {
         mutation.run(projectId, Requires.ACTIVE_PROJECT, () -> policy.requireProjectEdit(user, projectId),
             null, (locked, role) -> {
                 var inv = repo.findInvitation(invitationId, true).filter(i -> i.projectId().equals(projectId))
-                    .orElseThrow(() -> ApiException.notFound("INVITATION_NOT_FOUND", "Invitation not found"));
+                    .orElseThrow(() -> ApiException.notFound(ErrorCode.INVITATION_NOT_FOUND, "Invitation not found"));
                 if (inv.status() != InvitationStatus.PENDING) {
-                    throw ApiException.conflict("INVITATION_NOT_PENDING", "The invitation is no longer pending");
+                    throw ApiException.conflict(ErrorCode.INVITATION_NOT_PENDING, "The invitation is no longer pending");
                 }
                 repo.setInvitationStatus(invitationId, InvitationStatus.CANCELLED);
                 events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_CANCELLED, AuditResource.PROJECT, projectId.toString(),
@@ -120,17 +121,17 @@ public class InvitationService {
         requireStillValid(inv);
         if (locked.project().status() != ProjectStatus.ACTIVE || locked.project().kind() != ProjectKind.TEAM
             || locked.cls().teamFormation() != TeamFormation.STUDENT_FORMED) {
-            throw ApiException.conflict("TEAM_NOT_ACCEPTING_MEMBERS", "This team is no longer accepting members");
+            throw ApiException.conflict(ErrorCode.TEAM_NOT_ACCEPTING_MEMBERS, "This team is no longer accepting members");
         }
         var enrollment = classes.enrollmentStatus(classId, user.getId());
         if (enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED) {
-            throw ApiException.conflict("NOT_ENROLLED", "You are no longer enrolled in this class");
+            throw ApiException.conflict(ErrorCode.NOT_ENROLLED, "You are no longer enrolled in this class");
         }
         if (repo.activeProjectOf(classId, user.getId()).isPresent()) {
-            throw ApiException.conflict("ALREADY_IN_PROJECT", "You already belong to a project in this class");
+            throw ApiException.conflict(ErrorCode.ALREADY_IN_PROJECT, "You already belong to a project in this class");
         }
         if (repo.currentMembers(projectId).size() >= locked.cls().teamMaxSize()) {
-            throw ApiException.conflict("TEAM_FULL", "The team is full");
+            throw ApiException.conflict(ErrorCode.TEAM_FULL, "The team is full");
         }
         team.add(projectId, user.getId(), TeamRole.MEMBER, user.getId());
         repo.setInvitationStatus(invitationId, InvitationStatus.ACCEPTED);
@@ -153,12 +154,12 @@ public class InvitationService {
     /** The invitation must exist and be addressed to the caller; anyone else gets the same 404. */
     private InvitationRow ownInvitation(AppUserDetails user, UUID invitationId, boolean lock) {
         return repo.findInvitation(invitationId, lock).filter(i -> i.invitedUserId().equals(user.getId()))
-            .orElseThrow(() -> ApiException.notFound("INVITATION_NOT_FOUND", "Invitation not found"));
+            .orElseThrow(() -> ApiException.notFound(ErrorCode.INVITATION_NOT_FOUND, "Invitation not found"));
     }
 
     private static void requireStillValid(InvitationRow inv) {
         if (inv.status() != InvitationStatus.PENDING || inv.expiresAt().isBefore(OffsetDateTime.now())) {
-            throw ApiException.conflict("INVITATION_INVALID", "The invitation is no longer valid");
+            throw ApiException.conflict(ErrorCode.INVITATION_INVALID, "The invitation is no longer valid");
         }
     }
 }

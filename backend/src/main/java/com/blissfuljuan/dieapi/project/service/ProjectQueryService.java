@@ -7,6 +7,7 @@ import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.MemberRow;
 import com.blissfuljuan.dieapi.project.model.ProjectRow;
 import com.blissfuljuan.dieapi.project.repository.ProjectRepository;
@@ -73,7 +74,7 @@ public class ProjectQueryService {
         policy.requireClassView(user, classId);
         var cls = classes.peek(classId).orElseThrow(AccessPolicy::classNotFound);
         if (user.role() == UserRole.STUDENT && cls.teamFormation() != TeamFormation.STUDENT_FORMED) {
-            throw ApiException.forbidden("TEAMS_ASSIGNED_BY_INSTRUCTOR", "Teams are assigned by your instructor in this class");
+            throw ApiException.forbidden(ErrorCode.TEAMS_ASSIGNED_BY_INSTRUCTOR, "Teams are assigned by your instructor in this class");
         }
         return repo.eligibleClassmates(classId, user.getId());
     }

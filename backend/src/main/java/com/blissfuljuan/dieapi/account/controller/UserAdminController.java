@@ -6,7 +6,6 @@ import com.blissfuljuan.dieapi.account.service.AccountService;
 import com.blissfuljuan.dieapi.account.view.AccountChange;
 import com.blissfuljuan.dieapi.account.view.UserPage;
 import com.blissfuljuan.dieapi.account.view.UserView;
-import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -69,36 +68,36 @@ public class UserAdminController {
 
     @PostMapping
     public ResponseEntity<AccountChange> create(@Valid @RequestBody CreateUserRequest body,
-                                                @AuthenticationPrincipal AppUserDetails actor) {
+                                                @AuthenticationPrincipal(expression = "id") UUID actorId) {
         AccountChange created = accounts.create(new CreateUser(
             body.role(), body.studentNumber(), body.lastName(), body.firstName(), body.middleName(), body.email()),
-            actor.getId());
+            actorId);
         return ResponseEntity.created(URI.create("/api/v1/users/" + created.user().id()))
             .cacheControl(CacheControl.noStore()).body(created);
     }
 
     @PatchMapping("/{id}")
     public UserView update(@PathVariable UUID id, @Valid @RequestBody UpdateUserRequest body,
-                           @AuthenticationPrincipal AppUserDetails actor) {
+                           @AuthenticationPrincipal(expression = "id") UUID actorId) {
         return accounts.update(id, new UpdateUser(
             body.version(), body.role(), body.studentNumber(), body.lastName(), body.firstName(),
-            body.middleName(), body.email()), actor.getId());
+            body.middleName(), body.email()), actorId);
     }
 
     @PostMapping("/{id}/deactivate")
-    public UserView deactivate(@PathVariable UUID id, @AuthenticationPrincipal AppUserDetails actor) {
-        return accounts.deactivate(id, actor.getId());
+    public UserView deactivate(@PathVariable UUID id, @AuthenticationPrincipal(expression = "id") UUID actorId) {
+        return accounts.deactivate(id, actorId);
     }
 
     @PostMapping("/{id}/activate")
-    public ResponseEntity<AccountChange> activate(@PathVariable UUID id, @AuthenticationPrincipal AppUserDetails actor) {
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(accounts.activate(id, actor.getId()));
+    public ResponseEntity<AccountChange> activate(@PathVariable UUID id, @AuthenticationPrincipal(expression = "id") UUID actorId) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(accounts.activate(id, actorId));
     }
 
     @PostMapping("/{id}/reset-credentials")
     public ResponseEntity<AccountChange> resetCredentials(@PathVariable UUID id,
-                                                          @AuthenticationPrincipal AppUserDetails actor) {
+                                                          @AuthenticationPrincipal(expression = "id") UUID actorId) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-            .body(accounts.resetCredentials(id, actor.getId()));
+            .body(accounts.resetCredentials(id, actorId));
     }
 }

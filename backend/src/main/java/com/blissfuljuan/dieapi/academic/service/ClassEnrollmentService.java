@@ -16,7 +16,8 @@ import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
-import com.blissfuljuan.dieapi.project.service.TeamMembership;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
+import com.blissfuljuan.dieapi.academic.service.port.StudentRemovalHandler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,18 +38,18 @@ public class ClassEnrollmentService {
     private final ClassLocks locks;
     private final EnrollmentRules enrollmentRules;
     private final TempCredentialService tempCredentials;
-    private final TeamMembership teamMembership;
+    private final List<StudentRemovalHandler> removalHandlers;
 
     public ClassEnrollmentService(ClassRepository repo, AccessPolicy policy, ApplicationEventPublisher events, ClassLocks locks,
                                   EnrollmentRules enrollmentRules, TempCredentialService tempCredentials,
-                                  TeamMembership teamMembership) {
+                                  List<StudentRemovalHandler> removalHandlers) {
         this.repo = repo;
         this.policy = policy;
         this.events = events;
         this.locks = locks;
         this.enrollmentRules = enrollmentRules;
         this.tempCredentials = tempCredentials;
-        this.teamMembership = teamMembership;
+        this.removalHandlers = removalHandlers;
     }
 
     @Transactional(readOnly = true)
@@ -62,13 +63,13 @@ public class ClassEnrollmentService {
         policy.requireClassManage(user, classId);
         locks.lockWritable(classId);
         if ((req.studentId() == null) == (req.studentNumber() == null || req.studentNumber().isBlank())) {
-            throw ApiException.badRequest("INVALID_ENROLLMENT_TARGET", "Provide exactly one of studentId or studentNumber");
+            throw ApiException.badRequest(ErrorCode.INVALID_ENROLLMENT_TARGET, "Provide exactly one of studentId or studentNumber");
         }
         boolean admin = user.role() == UserRole.ADMIN;
         boolean byNumber = req.studentId() == null;
         if (byNumber && !admin && (req.lastName() == null || req.lastName().isBlank())) {
             // Instructors must prove they know the person, not just guess student numbers.
-            throw ApiException.badRequest("LAST_NAME_REQUIRED", "lastName is required when enrolling by studentNumber");
+            throw ApiException.badRequest(ErrorCode.LAST_NAME_REQUIRED, "lastName is required when enrolling by studentNumber");
         }
         // Every reason for refusing (unknown, deactivated, not a student, an account the caller may not claim,
         // wrong last name) answers with the same 404, so nothing is learned about other classes' accounts.
@@ -78,11 +79,11 @@ public class ClassEnrollmentService {
             .filter(s -> EnrollmentRules.mayEnroll(admin, user.getId(), s.role(), s.status(), s.createdBy(),
                 !admin && s.status() == AccountStatus.PENDING_ACTIVATION && repo.studentKnownToInstructor(user.getId(), s.id())))
             .filter(s -> !byNumber || admin || sameText(s.lastName(), req.lastName()))
-            .orElseThrow(() -> ApiException.notFound("STUDENT_NOT_FOUND", "Student not found"));
+            .orElseThrow(() -> ApiException.notFound(ErrorCode.STUDENT_NOT_FOUND, "Student not found"));
 
         var outcome = enrollmentRules.enroll(classId, student.id(), blankToNull(req.program()), blankToNull(req.section()));
         if (outcome == EnrollmentRules.Outcome.ALREADY_ENROLLED) {
-            throw ApiException.conflict("ALREADY_ENROLLED", "Student is already enrolled in this class");
+            throw ApiException.conflict(ErrorCode.ALREADY_ENROLLED, "Student is already enrolled in this class");
         }
         events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_ENROLLED, AuditResource.CLASS, classId.toString(),
             Map.of("studentId", student.id().toString(), "reinstated", outcome == EnrollmentRules.Outcome.REINSTATED)));
@@ -100,10 +101,10 @@ public class ClassEnrollmentService {
         var enrollment = repo.enrollmentStatus(classId, studentId);
         var student = repo.findStudentById(studentId);
         if (enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED || student.isEmpty()) {
-            throw ApiException.notFound("ENROLLMENT_NOT_FOUND", "Enrollment not found");
+            throw ApiException.notFound(ErrorCode.ENROLLMENT_NOT_FOUND, "Enrollment not found");
         }
         if (student.get().status() != AccountStatus.PENDING_ACTIVATION) {
-            throw ApiException.conflict("ACCOUNT_ALREADY_ACTIVATED",
+            throw ApiException.conflict(ErrorCode.ACCOUNT_ALREADY_ACTIVATED,
                 "The account is already activated; use password reset instead");
         }
         var issued = tempCredentials.issue(studentId, user.getId());
@@ -118,11 +119,11 @@ public class ClassEnrollmentService {
         locks.lockWritable(classId);
         var existing = repo.enrollmentStatus(classId, studentId);
         if (existing.isEmpty() || existing.get() != EnrollmentStatus.ENROLLED) {
-            throw ApiException.notFound("ENROLLMENT_NOT_FOUND", "Enrollment not found");
+            throw ApiException.notFound(ErrorCode.ENROLLMENT_NOT_FOUND, "Enrollment not found");
         }
         repo.removeEnrollment(classId, studentId);
         // A student who is no longer enrolled cannot stay on a team or hold team invitations.
-        teamMembership.onStudentRemovedFromClass(classId, studentId, user.getId());
+        removalHandlers.forEach(h -> h.onStudentRemovedFromClass(classId, studentId, user.getId()));
         events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_REMOVED, AuditResource.CLASS, classId.toString(), Map.of("studentId", studentId.toString())));
     }
 }

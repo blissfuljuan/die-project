@@ -4,6 +4,7 @@ import com.blissfuljuan.dieapi.auth.model.rule.ThrottleBucket;
 import com.blissfuljuan.dieapi.auth.model.rule.ThrottlePolicy;
 import com.blissfuljuan.dieapi.auth.repository.LoginAttemptRepository;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -55,7 +56,7 @@ public class LoginThrottleService {
             case PASSWORD_RESET -> attempts.failuresForIpWithPrefix(clientIp, ThrottleBucket.RESET_PREFIX, window);
         };
         if (policy.blocks(byIdentifier, byIp)) {
-            throw ApiException.tooManyRequests("TOO_MANY_ATTEMPTS", "Too many attempts. Wait a while before trying again.");
+            throw ApiException.tooManyRequests(ErrorCode.TOO_MANY_ATTEMPTS, "Too many attempts. Wait a while before trying again.");
         }
     }
 }

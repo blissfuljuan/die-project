@@ -2,6 +2,7 @@ package com.blissfuljuan.dieapi.roster.service;
 
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.roster.model.ImportHeader;
 import com.blissfuljuan.dieapi.roster.model.NormalizedRow;
 import com.blissfuljuan.dieapi.roster.model.RowOutcome;
@@ -38,7 +39,7 @@ public class RosterCommitSupport {
             StoredRow was = stored.get(i), now = fresh.get(i);
             if (was.action() != now.action() || was.conflictKind() != now.conflictKind()
                 || !Objects.equals(was.matchedUserId(), now.matchedUserId())) {
-                throw ApiException.conflict("IMPORT_STALE",
+                throw ApiException.conflict(ErrorCode.IMPORT_STALE,
                     "Accounts or enrollments changed since the preview (row " + was.rowNumber()
                         + "); upload the file again");
             }

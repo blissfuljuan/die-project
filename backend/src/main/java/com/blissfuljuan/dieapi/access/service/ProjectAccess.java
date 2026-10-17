@@ -5,6 +5,7 @@ import com.blissfuljuan.dieapi.access.model.SqlScope;
 import com.blissfuljuan.dieapi.access.repository.AccessRepository;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -60,6 +61,6 @@ class ProjectAccess {
     }
 
     static ApiException notFound() {
-        return ApiException.notFound("PROJECT_NOT_FOUND", "Project not found");
+        return ApiException.notFound(ErrorCode.PROJECT_NOT_FOUND, "Project not found");
     }
 }

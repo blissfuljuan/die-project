@@ -1,5 +1,6 @@
 package com.blissfuljuan.dieapi.common.util;
 
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -35,6 +36,11 @@ public final class ProblemDetails {
 
     private ProblemDetails() {}
 
+    public static ProblemDetail of(HttpStatus status, ErrorCode code, String detail) {
+        return of(status, code.value(), detail);
+    }
+
+    /** For the status-derived fallback code only ({@link #codeFor}); everything that names a code uses {@link ErrorCode}. */
     public static ProblemDetail of(HttpStatus status, String code, String detail) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setTitle(status.getReasonPhrase());

@@ -14,6 +14,7 @@ import com.blissfuljuan.dieapi.audit.model.AuditEvent;
 import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,16 +59,16 @@ public class AccountService {
     @Transactional
     public UserView update(UUID id, UpdateUser req, UUID actor) {
         if (req.version() == null) {
-            throw ApiException.badRequest("VERSION_REQUIRED", "version is required");
+            throw ApiException.badRequest(ErrorCode.VERSION_REQUIRED, "version is required");
         }
         LockedAccount cur = lock(id);
         if (cur.version() != req.version()) {
-            throw ApiException.conflict("ACCOUNT_VERSION_CONFLICT", "The account was modified by someone else; reload and retry");
+            throw ApiException.conflict(ErrorCode.ACCOUNT_VERSION_CONFLICT, "The account was modified by someone else; reload and retry");
         }
         UserRole role = req.role() == null ? cur.role() : validRole(req.role());
         boolean roleChanged = role != cur.role();
         if (roleChanged && id.equals(actor)) {
-            throw ApiException.conflict("CANNOT_CHANGE_OWN_ROLE", "You cannot change your own role");
+            throw ApiException.conflict(ErrorCode.CANNOT_CHANGE_OWN_ROLE, "You cannot change your own role");
         }
         String studentNumber = req.studentNumber() == null ? cur.studentNumber() : blankToNull(req.studentNumber());
         String last = req.lastName() == null ? cur.lastName() : required(req.lastName(), "lastName");
@@ -80,7 +81,7 @@ public class AccountService {
             if (requested != null && !requested.equals(cur.email())) {
                 if (cur.status() != AccountStatus.PENDING_ACTIVATION) {
                     // Changing a verified login email needs the verification flow (account recovery).
-                    throw ApiException.conflict("EMAIL_CHANGE_NOT_ALLOWED", "Email can only be changed before activation");
+                    throw ApiException.conflict(ErrorCode.EMAIL_CHANGE_NOT_ALLOWED, "Email can only be changed before activation");
                 }
                 email = requested;
             }
@@ -123,7 +124,7 @@ public class AccountService {
     public AccountChange activate(UUID id, UUID actor) {
         LockedAccount cur = lock(id);
         if (cur.status() != AccountStatus.DEACTIVATED) {
-            throw ApiException.conflict("ACCOUNT_NOT_DEACTIVATED", "Only deactivated accounts can be re-activated");
+            throw ApiException.conflict(ErrorCode.ACCOUNT_NOT_DEACTIVATED, "Only deactivated accounts can be re-activated");
         }
         boolean canLogIn = cur.hasPassword() && cur.emailVerified();
         AccountStatus resulting = canLogIn ? AccountStatus.ACTIVE : AccountStatus.PENDING_ACTIVATION;
@@ -144,7 +145,7 @@ public class AccountService {
         forbidSelf(id, actor, "reset the credentials of");
         LockedAccount cur = lock(id);
         if (cur.status() == AccountStatus.DEACTIVATED) {
-            throw ApiException.conflict("ACCOUNT_DEACTIVATED", "Re-activate the account before resetting credentials");
+            throw ApiException.conflict(ErrorCode.ACCOUNT_DEACTIVATED, "Re-activate the account before resetting credentials");
         }
         repo.clearPasswordAndSetPending(id);
         var issued = credentials.issue(id, actor);
@@ -155,7 +156,7 @@ public class AccountService {
 
     @Transactional(readOnly = true)
     public UserView get(UUID id) {
-        return repo.find(id).orElseThrow(() -> ApiException.notFound("USER_NOT_FOUND", "User not found"));
+        return repo.find(id).orElseThrow(() -> ApiException.notFound(ErrorCode.USER_NOT_FOUND, "User not found"));
     }
 
     @Transactional(readOnly = true)
@@ -164,7 +165,7 @@ public class AccountService {
         AccountStatus parsedStatus = null;
         if (statusFilter != null) {
             parsedStatus = AccountStatus.parse(statusFilter);
-            if (parsedStatus == null) throw ApiException.badRequest("INVALID_STATUS_FILTER", "Unknown status");
+            if (parsedStatus == null) throw ApiException.badRequest(ErrorCode.INVALID_STATUS_FILTER, "Unknown status");
         }
         return repo.search(roleFilter, parsedStatus, q, Math.max(page, 0), Math.min(Math.max(size, 1), 100));
     }
@@ -172,35 +173,35 @@ public class AccountService {
     // ---- helpers ----
 
     private LockedAccount lock(UUID id) {
-        return repo.lock(id).orElseThrow(() -> ApiException.notFound("USER_NOT_FOUND", "User not found"));
+        return repo.lock(id).orElseThrow(() -> ApiException.notFound(ErrorCode.USER_NOT_FOUND, "User not found"));
     }
 
     private static void forbidSelf(UUID id, UUID actor, String verb) {
         if (id.equals(actor)) {
-            throw ApiException.conflict("SELF_ACTION_FORBIDDEN", "You cannot " + verb + " your own account");
+            throw ApiException.conflict(ErrorCode.SELF_ACTION_FORBIDDEN, "You cannot " + verb + " your own account");
         }
     }
 
     private static void requireIdentity(UserRole role, String studentNumber, String email) {
         if (role == UserRole.STUDENT && studentNumber == null) {
-            throw ApiException.badRequest("STUDENT_NUMBER_REQUIRED", "studentNumber is required for students");
+            throw ApiException.badRequest(ErrorCode.STUDENT_NUMBER_REQUIRED, "studentNumber is required for students");
         }
         if (role != UserRole.STUDENT && email == null) {
-            throw ApiException.badRequest("EMAIL_REQUIRED", "email is required for instructors and administrators");
+            throw ApiException.badRequest(ErrorCode.EMAIL_REQUIRED, "email is required for instructors and administrators");
         }
     }
 
     private static UserRole validRole(String role) {
         UserRole parsed = UserRole.parse(role);
         if (parsed == null) {
-            throw ApiException.badRequest("INVALID_ROLE", "role must be STUDENT, INSTRUCTOR or ADMIN");
+            throw ApiException.badRequest(ErrorCode.INVALID_ROLE, "role must be STUDENT, INSTRUCTOR or ADMIN");
         }
         return parsed;
     }
 
     private static String required(String value, String field) {
         String v = blankToNull(value);
-        if (v == null) throw ApiException.badRequest("FIELD_REQUIRED", field + " is required");
+        if (v == null) throw ApiException.badRequest(ErrorCode.FIELD_REQUIRED, field + " is required");
         return v;
     }
 

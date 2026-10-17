@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.roster.service.reader;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.roster.model.RosterFileType;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -27,7 +28,7 @@ public class RosterReaderFactory {
     public RosterFileReader forFile(String fileName) {
         RosterFileType type = RosterFileType.fromFileName(fileName);
         if (type == null) {
-            throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "UNSUPPORTED_FILE_TYPE",
+            throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, ErrorCode.UNSUPPORTED_FILE_TYPE,
                 "Only .csv and .xlsx files are supported");
         }
         return readers.get(type);

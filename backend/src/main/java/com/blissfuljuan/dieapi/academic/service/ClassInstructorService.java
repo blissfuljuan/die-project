@@ -8,6 +8,7 @@ import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,7 +38,7 @@ public class ClassInstructorService {
         locks.lockWritable(classId);
         List<UUID> instructors = ClassInputs.distinct(requested);
         if (instructors.isEmpty()) {
-            throw ApiException.badRequest("INSTRUCTORS_REQUIRED", "A class needs at least one instructor");
+            throw ApiException.badRequest(ErrorCode.INSTRUCTORS_REQUIRED, "A class needs at least one instructor");
         }
         requireAssignable(instructors);
         List<UUID> before = repo.instructorIds(classId);
@@ -50,7 +51,7 @@ public class ClassInstructorService {
     /** Every id must be an existing, non-deactivated instructor account (also used when creating a class). */
     void requireAssignable(List<UUID> instructors) {
         if (repo.countAssignableInstructors(instructors) != instructors.size()) {
-            throw ApiException.badRequest("INSTRUCTOR_NOT_ASSIGNABLE",
+            throw ApiException.badRequest(ErrorCode.INSTRUCTOR_NOT_ASSIGNABLE,
                 "Every instructor id must belong to an existing, non-deactivated instructor account");
         }
     }

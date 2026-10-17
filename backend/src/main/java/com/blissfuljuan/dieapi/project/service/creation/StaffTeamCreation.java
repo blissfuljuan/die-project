@@ -3,6 +3,7 @@ package com.blissfuljuan.dieapi.project.service.creation;
 import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.ProjectCreation;
 import com.blissfuljuan.dieapi.project.model.ProjectKind;
 import com.blissfuljuan.dieapi.project.model.TeamRole;
@@ -37,12 +38,12 @@ public class StaffTeamCreation implements ProjectCreationStrategy {
     public UUID create(ProjectCreation c) {
         List<UUID> members = ProjectValidation.distinct(c.request().memberIds());
         if (members.isEmpty()) {
-            throw ApiException.badRequest("MEMBERS_REQUIRED", "memberIds must list at least one student");
+            throw ApiException.badRequest(ErrorCode.MEMBERS_REQUIRED, "memberIds must list at least one student");
         }
         ProjectValidation.checkTeamSize(c.cls(), members.size(), Boolean.TRUE.equals(c.request().allowSizeException()));
         UUID rep = c.request().representativeId() == null ? members.get(0) : c.request().representativeId();
         if (!members.contains(rep)) {
-            throw ApiException.badRequest("INVALID_REPRESENTATIVE", "representativeId must be one of memberIds");
+            throw ApiException.badRequest(ErrorCode.INVALID_REPRESENTATIVE, "representativeId must be one of memberIds");
         }
         for (UUID m : members) validation.assertEnrolledAndFree(c.classId(), m, null);
         UUID projectId = repo.insert(c.classId(), c.kind(), c.title(), c.description(), c.teamName(), c.actor().getId());

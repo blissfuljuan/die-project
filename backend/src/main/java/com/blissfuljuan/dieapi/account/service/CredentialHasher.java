@@ -2,6 +2,7 @@ package com.blissfuljuan.dieapi.account.service;
 
 import com.blissfuljuan.dieapi.account.service.TempCredentialService.Prepared;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
@@ -98,7 +99,7 @@ public class CredentialHasher implements DisposableBean {
     }
 
     private static ApiException busy(String reason) {
-        return ApiException.unavailable("CREDENTIAL_HASHING_BUSY", reason);
+        return ApiException.unavailable(ErrorCode.CREDENTIAL_HASHING_BUSY, reason);
     }
 
     @Override

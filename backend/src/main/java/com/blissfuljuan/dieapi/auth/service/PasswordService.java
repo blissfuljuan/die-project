@@ -18,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 
 import java.util.*;
 
@@ -90,7 +91,7 @@ public class PasswordService {
     @Transactional
     public void confirmReset(String token, String newPassword, String clientIp) {
         ResetLink row = repository.lockLiveReset(Tokens.sha256(token))
-            .orElseThrow(() -> ApiException.badRequest("RESET_LINK_INVALID", INVALID_LINK));
+            .orElseThrow(() -> ApiException.badRequest(ErrorCode.RESET_LINK_INVALID, INVALID_LINK));
 
         policy.validate(newPassword, List.of(row.email())); // rolls back: the link stays usable for a retry
 
@@ -115,7 +116,7 @@ public class PasswordService {
         if (!encoder.matches(currentPassword, row.passwordHash())) {
             throttle.record(key, clientIp, false);
             events.publishEvent(AuditEvent.of(userId, AuditAction.PASSWORD_CHANGE_FAILED, AuditResource.USER, userId.toString(), Map.of()));
-            throw ApiException.badRequest("CURRENT_PASSWORD_INCORRECT", "Current password is incorrect");
+            throw ApiException.badRequest(ErrorCode.CURRENT_PASSWORD_INCORRECT, "Current password is incorrect");
         }
         policy.validate(newPassword, List.of(row.email(), currentPassword));
 

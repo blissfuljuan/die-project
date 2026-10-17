@@ -1,5 +1,6 @@
 package com.blissfuljuan.dieapi.config;
 
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.common.util.ProblemDetails;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,7 +25,7 @@ public class JsonAuthenticationEntryPoint implements AuthenticationEntryPoint {
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException ex)
             throws IOException {
-        ProblemDetails.write(request, response, mapper, ProblemDetails.of(HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
+        ProblemDetails.write(request, response, mapper, ProblemDetails.of(HttpStatus.UNAUTHORIZED, ErrorCode.AUTHENTICATION_REQUIRED,
             "Authentication is required to use this endpoint. Sign in (POST /api/v1/auth/login) and try again."));
     }
 }

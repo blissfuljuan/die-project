@@ -5,6 +5,7 @@ import com.blissfuljuan.dieapi.academic.model.LockedClass;
 import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -31,7 +32,7 @@ public class ClassLocks {
 
     public static void assertWritable(ClassStatus status) {
         if (status == ClassStatus.ARCHIVED) {
-            throw ApiException.conflict("CLASS_ARCHIVED", "The class is archived and read-only");
+            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The class is archived and read-only");
         }
     }
 }

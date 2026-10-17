@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.roster.service.reader;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.roster.model.GridRow;
 import com.blissfuljuan.dieapi.roster.model.RosterFileType;
 import org.apache.commons.csv.CSVFormat;
@@ -44,7 +45,7 @@ public class CsvRosterReader implements RosterFileReader {
     @Override
     public List<GridRow> read(byte[] bytes) {
         for (byte b : bytes) {
-            if (b == 0) throw ApiException.badRequest("FILE_NOT_TEXT", "The file is not a text CSV file");
+            if (b == 0) throw ApiException.badRequest(ErrorCode.FILE_NOT_TEXT, "The file is not a text CSV file");
         }
         String text;
         try {
@@ -52,7 +53,7 @@ public class CsvRosterReader implements RosterFileReader {
                 .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
                 .decode(ByteBuffer.wrap(bytes)).toString();
         } catch (CharacterCodingException e) {
-            throw ApiException.badRequest("CSV_NOT_UTF8", "The CSV file must be UTF-8 encoded");
+            throw ApiException.badRequest(ErrorCode.CSV_NOT_UTF8, "The CSV file must be UTF-8 encoded");
         }
         if (text.startsWith("﻿")) text = text.substring(1);
 
@@ -62,19 +63,19 @@ public class CsvRosterReader implements RosterFileReader {
         List<GridRow> rows = new ArrayList<>();
         try (CSVParser parser = CSVParser.parse(new StringReader(text), format)) {
             for (CSVRecord record : parser) {
-                if (record.size() > MAX_COLUMNS) throw ApiException.badRequest("TOO_MANY_COLUMNS", "Too many columns");
+                if (record.size() > MAX_COLUMNS) throw ApiException.badRequest(ErrorCode.TOO_MANY_COLUMNS, "Too many columns");
                 List<String> cells = new ArrayList<>(record.size());
                 for (String v : record) cells.add(cap(v));
                 if (cells.stream().allMatch(String::isBlank)) continue;   // blank lines never count toward the cap
                 rows.add(new GridRow((int) record.getRecordNumber(), cells, false));
                 if (rows.size() > rawRowLimit(maxRows)) {
-                    throw ApiException.badRequest("TOO_MANY_ROWS", "Too many rows (maximum " + maxRows + ")");
+                    throw ApiException.badRequest(ErrorCode.TOO_MANY_ROWS, "Too many rows (maximum " + maxRows + ")");
                 }
             }
         } catch (IOException | RuntimeException e) {
             if (e instanceof ApiException r) throw r;
             log.debug("CSV parse failure", e);
-            throw ApiException.badRequest("CSV_UNREADABLE", "The CSV file could not be read (check quotes and delimiters)");
+            throw ApiException.badRequest(ErrorCode.CSV_UNREADABLE, "The CSV file could not be read (check quotes and delimiters)");
         }
         return rows;
     }

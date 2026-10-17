@@ -5,6 +5,7 @@ import com.blissfuljuan.dieapi.access.model.SqlScope;
 import com.blissfuljuan.dieapi.access.repository.AccessRepository;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -51,6 +52,6 @@ class ClassAccess {
     }
 
     static ApiException notFound() {
-        return ApiException.notFound("CLASS_NOT_FOUND", "Class not found");
+        return ApiException.notFound(ErrorCode.CLASS_NOT_FOUND, "Class not found");
     }
 }

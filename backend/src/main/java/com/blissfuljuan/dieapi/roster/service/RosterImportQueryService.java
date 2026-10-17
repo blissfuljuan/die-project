@@ -3,6 +3,7 @@ package com.blissfuljuan.dieapi.roster.service;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.roster.model.ImportHeader;
 import com.blissfuljuan.dieapi.roster.model.RowOutcome;
 import com.blissfuljuan.dieapi.roster.model.StoredRow;
@@ -46,7 +47,7 @@ public class RosterImportQueryService {
         ImportHeader h = header(user, importId, false);
         RowOutcome filter = RowOutcome.parse(action);
         if (action != null && filter == null) {
-            throw ApiException.badRequest("INVALID_ACTION_FILTER",
+            throw ApiException.badRequest(ErrorCode.INVALID_ACTION_FILTER,
                 "action must be one of " + Arrays.toString(RowOutcome.values()));
         }
         int safePage = Math.max(page, 0);
@@ -80,6 +81,6 @@ public class RosterImportQueryService {
     }
 
     private static ApiException importNotFound() {
-        return ApiException.notFound("IMPORT_NOT_FOUND", "Roster import not found");
+        return ApiException.notFound(ErrorCode.IMPORT_NOT_FOUND, "Roster import not found");
     }
 }

@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.roster.service.reader;
 
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.roster.model.GridRow;
 import com.blissfuljuan.dieapi.roster.model.RosterFileType;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
@@ -65,15 +66,15 @@ public class XlsxRosterReader implements RosterFileReader {
     @Override
     public List<GridRow> read(byte[] bytes) {
         if (bytes.length < 4 || bytes[0] != 'P' || bytes[1] != 'K' || bytes[2] != 3 || bytes[3] != 4) {
-            throw ApiException.badRequest("XLSX_INVALID", "The file is not a valid .xlsx workbook");
+            throw ApiException.badRequest(ErrorCode.XLSX_INVALID, "The file is not a valid .xlsx workbook");
         }
         preflight(bytes);
         List<GridRow> rows = new ArrayList<>();
         try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
-            if (workbook.getNumberOfSheets() == 0) throw ApiException.badRequest("XLSX_NO_SHEETS", "The workbook has no sheets");
+            if (workbook.getNumberOfSheets() == 0) throw ApiException.badRequest(ErrorCode.XLSX_NO_SHEETS, "The workbook has no sheets");
             Sheet sheet = workbook.getSheetAt(0);
             if (sheet.getLastRowNum() > rawRowLimit(maxRows)) {
-                throw ApiException.badRequest("TOO_MANY_ROWS", "Too many rows (maximum " + maxRows + ")");
+                throw ApiException.badRequest(ErrorCode.TOO_MANY_ROWS, "Too many rows (maximum " + maxRows + ")");
             }
             DataFormatter formatter = new DataFormatter(Locale.ROOT);
             for (int r = Math.max(sheet.getFirstRowNum(), 0); r <= sheet.getLastRowNum(); r++) {
@@ -100,7 +101,7 @@ public class XlsxRosterReader implements RosterFileReader {
             throw e;
         } catch (Exception e) {
             log.debug("XLSX parse failure", e);
-            throw ApiException.badRequest("XLSX_UNREADABLE", "The workbook could not be read");
+            throw ApiException.badRequest(ErrorCode.XLSX_UNREADABLE, "The workbook could not be read");
         }
         return rows;
     }
@@ -117,7 +118,7 @@ public class XlsxRosterReader implements RosterFileReader {
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
-                if (++entries > MAX_ZIP_ENTRIES) throw ApiException.badRequest("XLSX_TOO_MANY_PARTS", "The workbook has too many parts");
+                if (++entries > MAX_ZIP_ENTRIES) throw ApiException.badRequest(ErrorCode.XLSX_TOO_MANY_PARTS, "The workbook has too many parts");
                 boolean worksheet = entry.getName().startsWith("xl/worksheets/") && entry.getName().endsWith(".xml");
                 long entryBytes = 0;
                 int rows = 0;
@@ -127,7 +128,7 @@ public class XlsxRosterReader implements RosterFileReader {
                     entryBytes += read;
                     total += read;
                     if (entryBytes > MAX_ENTRY_BYTES || total > MAX_UNPACKED_BYTES) {
-                        throw ApiException.badRequest("XLSX_TOO_LARGE_UNPACKED", "The workbook is too large once unpacked");
+                        throw ApiException.badRequest(ErrorCode.XLSX_TOO_LARGE_UNPACKED, "The workbook is too large once unpacked");
                     }
                     if (worksheet) {
                         for (int i = 0; i < read; i++) {
@@ -135,7 +136,7 @@ public class XlsxRosterReader implements RosterFileReader {
                             if (b == ROW_MARKER[matched]) {
                                 if (++matched == ROW_MARKER.length) {
                                     matched = 0;
-                                    if (++rows > rowLimit) throw ApiException.badRequest("TOO_MANY_ROWS", "Too many rows (maximum " + maxRows + ")");
+                                    if (++rows > rowLimit) throw ApiException.badRequest(ErrorCode.TOO_MANY_ROWS, "Too many rows (maximum " + maxRows + ")");
                                 }
                             } else {
                                 matched = b == ROW_MARKER[0] ? 1 : 0;
@@ -148,7 +149,7 @@ public class XlsxRosterReader implements RosterFileReader {
             throw e;
         } catch (IOException | RuntimeException e) {
             log.debug("XLSX preflight failure", e);
-            throw ApiException.badRequest("XLSX_UNREADABLE", "The workbook could not be read");
+            throw ApiException.badRequest(ErrorCode.XLSX_UNREADABLE, "The workbook could not be read");
         }
     }
 }

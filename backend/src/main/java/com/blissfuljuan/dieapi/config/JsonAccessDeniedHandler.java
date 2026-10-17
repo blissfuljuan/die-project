@@ -1,5 +1,6 @@
 package com.blissfuljuan.dieapi.config;
 
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.common.util.ProblemDetails;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,10 +31,10 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
     public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException ex)
             throws IOException {
         ProblemDetail problem = ex instanceof CsrfException
-            ? ProblemDetails.of(HttpStatus.FORBIDDEN, "CSRF_TOKEN_INVALID",
+            ? ProblemDetails.of(HttpStatus.FORBIDDEN, ErrorCode.CSRF_TOKEN_INVALID,
                 "The CSRF token is missing or invalid. Fetch one with GET /api/v1/auth/csrf and send it in the "
                     + "X-XSRF-TOKEN header (browsers also keep it in the XSRF-TOKEN cookie).")
-            : ProblemDetails.of(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "You do not have permission to perform this action.");
+            : ProblemDetails.of(HttpStatus.FORBIDDEN, ErrorCode.ACCESS_DENIED, "You do not have permission to perform this action.");
         ProblemDetails.write(request, response, mapper, problem);
     }
 }

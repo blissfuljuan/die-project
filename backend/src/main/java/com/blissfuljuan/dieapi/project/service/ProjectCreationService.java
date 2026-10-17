@@ -8,6 +8,7 @@ import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.CreateProject;
 import com.blissfuljuan.dieapi.project.model.ProjectCreation;
 import com.blissfuljuan.dieapi.project.model.ProjectKind;
@@ -54,7 +55,7 @@ public class ProjectCreationService {
         var cls = mutation.lockWritableClass(classId);
 
         ProjectKind kind = ProjectKind.parse(req.kind());
-        if (kind == null) throw ApiException.badRequest("INVALID_PROJECT_KIND", "kind must be INDIVIDUAL or TEAM");
+        if (kind == null) throw ApiException.badRequest(ErrorCode.INVALID_PROJECT_KIND, "kind must be INDIVIDUAL or TEAM");
         String title = text(req.title(), "title", 200, true);
         String description = text(req.description(), "description", 2000, false);
         String teamName = text(req.teamName(), "teamName", 100, false);

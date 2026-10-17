@@ -17,6 +17,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 
 import java.io.IOException;
 import java.net.URI;
@@ -46,7 +47,7 @@ public class RosterImportController {
         try {
             bytes = file.getBytes();
         } catch (IOException e) {
-            throw ApiException.badRequest("UPLOAD_UNREADABLE", "The upload could not be read");
+            throw ApiException.badRequest(ErrorCode.UPLOAD_UNREADABLE, "The upload could not be read");
         }
         ImportView preview = imports.upload(user, classId, file.getOriginalFilename(), bytes);
         return ResponseEntity.created(URI.create("/api/v1/roster-imports/" + preview.id())).body(preview);

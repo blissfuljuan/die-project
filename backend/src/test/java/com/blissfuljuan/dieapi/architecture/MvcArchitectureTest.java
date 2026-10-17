@@ -24,6 +24,7 @@ import java.util.Set;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.*;
 import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
+import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
 /**
  * Model-View-Controller, enforced for every module, present and future.
@@ -132,13 +133,25 @@ class MvcArchitectureTest {
         .should().beAnnotatedWith(Transactional.class);
 
     /**
-     * Services keep SQL in repositories: no JdbcClient/DataSource in any {@code ..service..} package. Wiring
-     * beans that need a JdbcClient (security filters) live in {@code config}, not in a service package.
+     * SQL lives in repositories only: no JdbcClient/DataSource in any {@code ..service..} package nor in
+     * {@code config} (wiring and security filters call repositories).
      */
     @ArchTest
-    static final ArchRule servicesDoNotUseJdbc = noClasses()
-        .that().resideInAPackage("..service..")
+    static final ArchRule servicesAndConfigDoNotUseJdbc = noClasses()
+        .that().resideInAnyPackage("..service..", BASE + ".config..")
         .should().dependOnClassesThat().resideInAnyPackage("org.springframework.jdbc..", "javax.sql..");
+
+    // ---- no cycles between modules ----
+
+    /**
+     * Modules (first package below the base, including config and common) form an acyclic graph. Cross-module
+     * reactions go through ports defined by the module that needs them and implemented by the other one
+     * (academic.service.port <- project.service.adapter), or through events (audit). No cycle is allowlisted.
+     */
+    @ArchTest
+    static final ArchRule modulesAreFreeOfCycles = slices()
+        .matching(BASE + ".(*)..")
+        .should().beFreeOfCycles();
 
     // ---- what controllers hand back ----
 

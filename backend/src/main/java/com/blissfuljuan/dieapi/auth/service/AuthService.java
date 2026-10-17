@@ -6,6 +6,7 @@ import com.blissfuljuan.dieapi.audit.model.AuditResource;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
+import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -51,7 +52,7 @@ public class AuthService {
         } catch (AuthenticationException e) {
             throttle.record(identifier, clientIp, false);
             events.publishEvent(AuditEvent.of(null, AuditAction.LOGIN_FAILED, AuditResource.AUTH, null, Map.of("ip", String.valueOf(clientIp))));
-            throw ApiException.unauthorized("INVALID_CREDENTIALS", "Invalid email or password");
+            throw ApiException.unauthorized(ErrorCode.INVALID_CREDENTIALS, "Invalid email or password");
         }
     }
 

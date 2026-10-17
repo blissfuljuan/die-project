@@ -1,10 +1,10 @@
 package com.blissfuljuan.dieapi.config;
 
 import jakarta.servlet.DispatcherType;
+import com.blissfuljuan.dieapi.account.repository.AccountRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -25,11 +25,11 @@ import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain apiSecurity(HttpSecurity http, JdbcClient jdbc, JsonAuthenticationEntryPoint entryPoint,
+    SecurityFilterChain apiSecurity(HttpSecurity http, AccountRepository accounts, JsonAuthenticationEntryPoint entryPoint,
                                     JsonAccessDeniedHandler deniedHandler) throws Exception {
         http
             // Re-check account status/role on each authenticated request (see SessionRevalidationFilter).
-            .addFilterBefore(new SessionRevalidationFilter(jdbc), AuthorizationFilter.class)
+            .addFilterBefore(new SessionRevalidationFilter(accounts), AuthorizationFilter.class)
             .csrf(csrf -> csrf
                 .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
