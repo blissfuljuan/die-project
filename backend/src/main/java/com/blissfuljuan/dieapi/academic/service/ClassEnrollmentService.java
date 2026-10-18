@@ -53,20 +53,20 @@ public class ClassEnrollmentService {
     }
 
     @Transactional(readOnly = true)
-    public List<EnrollmentView> roster(AppUserDetails user, UUID classId, boolean includeRemoved) {
-        policy.requireClassManage(user, classId);
-        return repo.enrollments(classId, includeRemoved);
+    public List<EnrollmentView> roster(AppUserDetails user, UUID workspaceId, boolean includeRemoved) {
+        policy.requireClassManage(user, workspaceId);
+        return repo.enrollments(workspaceId, includeRemoved);
     }
 
     @Transactional
-    public void enroll(AppUserDetails user, UUID classId, EnrollStudent req) {
-        policy.requireClassManage(user, classId);
-        locks.lockWritable(classId);
-        if ((req.studentId() == null) == (req.studentNumber() == null || req.studentNumber().isBlank())) {
-            throw ApiException.badRequest(ErrorCode.INVALID_ENROLLMENT_TARGET, "Provide exactly one of studentId or studentNumber");
+    public void enroll(AppUserDetails user, UUID workspaceId, EnrollStudent req) {
+        policy.requireClassManage(user, workspaceId);
+        locks.lockWritable(workspaceId);
+        if ((req.participantId() == null) == (req.studentNumber() == null || req.studentNumber().isBlank())) {
+            throw ApiException.badRequest(ErrorCode.INVALID_ENROLLMENT_TARGET, "Provide exactly one of participantId or studentNumber");
         }
         boolean admin = user.role() == UserRole.ADMIN;
-        boolean byNumber = req.studentId() == null;
+        boolean byNumber = req.participantId() == null;
         if (byNumber && !admin && (req.lastName() == null || req.lastName().isBlank())) {
             // Instructors must prove they know the person, not just guess student numbers.
             throw ApiException.badRequest(ErrorCode.LAST_NAME_REQUIRED, "lastName is required when enrolling by studentNumber");
@@ -75,18 +75,18 @@ public class ClassEnrollmentService {
         // wrong last name) answers with the same 404, so nothing is learned about other classes' accounts.
         StudentRef student = (byNumber
             ? repo.findStudentByNumber(req.studentNumber().trim())
-            : repo.findStudentById(req.studentId()))
+            : repo.findStudentById(req.participantId()))
             .filter(s -> EnrollmentRules.mayEnroll(admin, user.getId(), s.role(), s.status(), s.createdBy(),
                 !admin && s.status() == AccountStatus.PENDING_ACTIVATION && repo.studentKnownToInstructor(user.getId(), s.id())))
             .filter(s -> !byNumber || admin || sameText(s.lastName(), req.lastName()))
-            .orElseThrow(() -> ApiException.notFound(ErrorCode.STUDENT_NOT_FOUND, "Student not found"));
+            .orElseThrow(() -> ApiException.notFound(ErrorCode.PARTICIPANT_NOT_FOUND, "Participant not found"));
 
-        var outcome = enrollmentRules.enroll(classId, student.id(), blankToNull(req.program()), blankToNull(req.section()));
+        var outcome = enrollmentRules.enroll(workspaceId, student.id(), blankToNull(req.program()), blankToNull(req.section()));
         if (outcome == EnrollmentRules.Outcome.ALREADY_ENROLLED) {
-            throw ApiException.conflict(ErrorCode.ALREADY_ENROLLED, "Student is already enrolled in this class");
+            throw ApiException.conflict(ErrorCode.ALREADY_ENROLLED, "Participant is already enrolled in this workspace");
         }
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_ENROLLED, AuditResource.CLASS, classId.toString(),
-            Map.of("studentId", student.id().toString(), "reinstated", outcome == EnrollmentRules.Outcome.REINSTATED)));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_ENROLLED, AuditResource.CLASS, workspaceId.toString(),
+            Map.of("participantId", student.id().toString(), "reinstated", outcome == EnrollmentRules.Outcome.REINSTATED)));
     }
 
     /**
@@ -95,11 +95,11 @@ public class ClassEnrollmentService {
      * accounts that have been activated: those use password reset.
      */
     @Transactional
-    public TemporaryCredentialView reissueTemporaryCredential(AppUserDetails user, UUID classId, UUID studentId) {
-        policy.requireClassManage(user, classId);
-        locks.lockWritable(classId);
-        var enrollment = repo.enrollmentStatus(classId, studentId);
-        var student = repo.findStudentById(studentId);
+    public TemporaryCredentialView reissueTemporaryCredential(AppUserDetails user, UUID workspaceId, UUID participantId) {
+        policy.requireClassManage(user, workspaceId);
+        locks.lockWritable(workspaceId);
+        var enrollment = repo.enrollmentStatus(workspaceId, participantId);
+        var student = repo.findStudentById(participantId);
         if (enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED || student.isEmpty()) {
             throw ApiException.notFound(ErrorCode.ENROLLMENT_NOT_FOUND, "Enrollment not found");
         }
@@ -107,23 +107,23 @@ public class ClassEnrollmentService {
             throw ApiException.conflict(ErrorCode.ACCOUNT_ALREADY_ACTIVATED,
                 "The account is already activated; use password reset instead");
         }
-        var issued = tempCredentials.issue(studentId, user.getId());
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEMP_CREDENTIAL_REISSUED, AuditResource.USER, studentId.toString(),
-            Map.of("classId", classId.toString())));
+        var issued = tempCredentials.issue(participantId, user.getId());
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEMP_CREDENTIAL_REISSUED, AuditResource.USER, participantId.toString(),
+            Map.of("workspaceId", workspaceId.toString())));
         return new TemporaryCredentialView(issued.secret(), issued.expiresAt());
     }
 
     @Transactional
-    public void unenroll(AppUserDetails user, UUID classId, UUID studentId) {
-        policy.requireClassManage(user, classId);
-        locks.lockWritable(classId);
-        var existing = repo.enrollmentStatus(classId, studentId);
+    public void unenroll(AppUserDetails user, UUID workspaceId, UUID participantId) {
+        policy.requireClassManage(user, workspaceId);
+        locks.lockWritable(workspaceId);
+        var existing = repo.enrollmentStatus(workspaceId, participantId);
         if (existing.isEmpty() || existing.get() != EnrollmentStatus.ENROLLED) {
             throw ApiException.notFound(ErrorCode.ENROLLMENT_NOT_FOUND, "Enrollment not found");
         }
-        repo.removeEnrollment(classId, studentId);
+        repo.removeEnrollment(workspaceId, participantId);
         // A student who is no longer enrolled cannot stay on a team or hold team invitations.
-        removalHandlers.forEach(h -> h.onStudentRemovedFromClass(classId, studentId, user.getId()));
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_REMOVED, AuditResource.CLASS, classId.toString(), Map.of("studentId", studentId.toString())));
+        removalHandlers.forEach(h -> h.onStudentRemovedFromClass(workspaceId, participantId, user.getId()));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.STUDENT_REMOVED, AuditResource.CLASS, workspaceId.toString(), Map.of("participantId", participantId.toString())));
     }
 }

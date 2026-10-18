@@ -31,16 +31,16 @@ public class ProjectValidation {
     }
 
     /** The student must be an active, enrolled student of the class and on no other active project. */
-    public void assertEnrolledAndFree(UUID classId, UUID studentId, UUID exceptProject) {
-        var enrollment = classes.enrollmentStatus(classId, studentId);
-        var student = classes.findStudentById(studentId);
+    public void assertEnrolledAndFree(UUID workspaceId, UUID participantId, UUID exceptProject) {
+        var enrollment = classes.enrollmentStatus(workspaceId, participantId);
+        var student = classes.findStudentById(participantId);
         if (enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED || student.isEmpty()
-            || student.get().role() != UserRole.STUDENT || student.get().status() == AccountStatus.DEACTIVATED) {
-            throw ApiException.badRequest(ErrorCode.STUDENT_NOT_ELIGIBLE, "Student " + studentId + " is not an active, enrolled student of this class");
+            || student.get().role() != UserRole.PARTICIPANT || student.get().status() == AccountStatus.DEACTIVATED) {
+            throw ApiException.badRequest(ErrorCode.PARTICIPANT_NOT_ELIGIBLE, "Participant " + participantId + " is not an active, enrolled participant of this workspace");
         }
-        var other = repo.activeProjectOf(classId, studentId);
+        var other = repo.activeProjectOf(workspaceId, participantId);
         if (other.isPresent() && !other.get().equals(exceptProject)) {
-            throw ApiException.conflict(ErrorCode.STUDENT_IN_OTHER_PROJECT, "Student " + studentId + " already belongs to another project in this class");
+            throw ApiException.conflict(ErrorCode.PARTICIPANT_IN_OTHER_PROJECT, "Participant " + participantId + " already belongs to another project in this workspace");
         }
     }
 

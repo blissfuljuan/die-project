@@ -39,9 +39,9 @@ public class RosterImportController {
         this.queries = queries;
     }
 
-    @PostMapping(path = "/classes/{classId}/roster-imports", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(path = "/workspaces/{workspaceId}/roster-imports", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ImportView> upload(@AuthenticationPrincipal AppUserDetails user,
-                                             @PathVariable UUID classId,
+                                             @PathVariable UUID workspaceId,
                                              @RequestParam("file") MultipartFile file) {
         byte[] bytes;
         try {
@@ -49,13 +49,13 @@ public class RosterImportController {
         } catch (IOException e) {
             throw ApiException.badRequest(ErrorCode.UPLOAD_UNREADABLE, "The upload could not be read");
         }
-        ImportView preview = imports.upload(user, classId, file.getOriginalFilename(), bytes);
+        ImportView preview = imports.upload(user, workspaceId, file.getOriginalFilename(), bytes);
         return ResponseEntity.created(URI.create("/api/v1/roster-imports/" + preview.id())).body(preview);
     }
 
-    @GetMapping("/classes/{classId}/roster-imports")
-    public List<ImportView> list(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID classId) {
-        return queries.list(user, classId);
+    @GetMapping("/workspaces/{workspaceId}/roster-imports")
+    public List<ImportView> list(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID workspaceId) {
+        return queries.list(user, workspaceId);
     }
 
     @GetMapping("/roster-imports/{id}")

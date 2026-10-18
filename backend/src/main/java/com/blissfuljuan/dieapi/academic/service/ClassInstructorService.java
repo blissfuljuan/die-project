@@ -33,26 +33,26 @@ public class ClassInstructorService {
     }
 
     @Transactional
-    public void setInstructors(AppUserDetails user, UUID classId, List<UUID> requested) {
-        policy.requireClassManage(user, classId);
-        locks.lockWritable(classId);
-        List<UUID> instructors = ClassInputs.distinct(requested);
-        if (instructors.isEmpty()) {
-            throw ApiException.badRequest(ErrorCode.INSTRUCTORS_REQUIRED, "A class needs at least one instructor");
+    public void setCoordinators(AppUserDetails user, UUID workspaceId, List<UUID> requested) {
+        policy.requireClassManage(user, workspaceId);
+        locks.lockWritable(workspaceId);
+        List<UUID> coordinators = ClassInputs.distinct(requested);
+        if (coordinators.isEmpty()) {
+            throw ApiException.badRequest(ErrorCode.COORDINATORS_REQUIRED, "A workspace needs at least one coordinator");
         }
-        requireAssignable(instructors);
-        List<UUID> before = repo.instructorIds(classId);
-        repo.replaceInstructors(classId, instructors);
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_INSTRUCTORS_CHANGED, AuditResource.CLASS, classId.toString(),
+        requireAssignable(coordinators);
+        List<UUID> before = repo.coordinatorIds(workspaceId);
+        repo.replaceInstructors(workspaceId, coordinators);
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_INSTRUCTORS_CHANGED, AuditResource.CLASS, workspaceId.toString(),
             Map.of("before", before.stream().map(UUID::toString).toList(),
-                "after", instructors.stream().map(UUID::toString).toList())));
+                "after", coordinators.stream().map(UUID::toString).toList())));
     }
 
     /** Every id must be an existing, non-deactivated instructor account (also used when creating a class). */
-    void requireAssignable(List<UUID> instructors) {
-        if (repo.countAssignableInstructors(instructors) != instructors.size()) {
-            throw ApiException.badRequest(ErrorCode.INSTRUCTOR_NOT_ASSIGNABLE,
-                "Every instructor id must belong to an existing, non-deactivated instructor account");
+    void requireAssignable(List<UUID> coordinators) {
+        if (repo.countAssignableInstructors(coordinators) != coordinators.size()) {
+            throw ApiException.badRequest(ErrorCode.COORDINATOR_NOT_ASSIGNABLE,
+                "Every coordinator id must belong to an existing, non-deactivated coordinator account");
         }
     }
 }

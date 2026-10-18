@@ -30,18 +30,18 @@ public class StaffIndividualCreation implements ProjectCreationStrategy {
 
     @Override
     public boolean supports(UserRole actor, ProjectKind kind) {
-        return actor != UserRole.STUDENT && kind == ProjectKind.INDIVIDUAL;
+        return actor != UserRole.PARTICIPANT && kind == ProjectKind.INDIVIDUAL;
     }
 
     @Override
     public UUID create(ProjectCreation c) {
-        UUID studentId = c.request().studentId();
-        if (studentId == null) {
-            throw ApiException.badRequest(ErrorCode.STUDENT_REQUIRED, "studentId is required for an individual project");
+        UUID participantId = c.request().participantId();
+        if (participantId == null) {
+            throw ApiException.badRequest(ErrorCode.PARTICIPANT_REQUIRED, "participantId is required for an individual project");
         }
-        validation.assertEnrolledAndFree(c.classId(), studentId, null);
-        UUID projectId = repo.insert(c.classId(), c.kind(), c.title(), c.description(), null, c.actor().getId());
-        team.add(projectId, studentId, TeamRole.MEMBER, c.actor().getId());
+        validation.assertEnrolledAndFree(c.workspaceId(), participantId, null);
+        UUID projectId = repo.insert(c.workspaceId(), c.kind(), c.title(), c.description(), null, c.actor().getId());
+        team.add(projectId, participantId, TeamRole.MEMBER, c.actor().getId());
         return projectId;
     }
 

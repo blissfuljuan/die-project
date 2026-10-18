@@ -5,7 +5,7 @@ import java.util.UUID;
 
 /** Roster row. Staff-only: never returned to students. */
 public record EnrollmentView(
-    UUID studentId,
+    UUID participantId,
     String studentNumber,
     String lastName,
     String firstName,

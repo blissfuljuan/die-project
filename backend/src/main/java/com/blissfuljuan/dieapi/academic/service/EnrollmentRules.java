@@ -25,16 +25,16 @@ public class EnrollmentRules {
         this.repo = repo;
     }
 
-    public Outcome enroll(UUID classId, UUID studentId, String program, String section) {
-        var existing = repo.enrollmentStatus(classId, studentId);
+    public Outcome enroll(UUID workspaceId, UUID participantId, String program, String section) {
+        var existing = repo.enrollmentStatus(workspaceId, participantId);
         if (existing.isPresent() && existing.get() == EnrollmentStatus.ENROLLED) {
             return Outcome.ALREADY_ENROLLED;
         }
         if (existing.isPresent()) {
-            repo.reinstateEnrollment(classId, studentId, program, section);
+            repo.reinstateEnrollment(workspaceId, participantId, program, section);
             return Outcome.REINSTATED;
         }
-        repo.insertEnrollment(classId, studentId, program, section);
+        repo.insertEnrollment(workspaceId, participantId, program, section);
         return Outcome.ENROLLED;
     }
 
@@ -48,7 +48,7 @@ public class EnrollmentRules {
      */
     public static boolean mayEnroll(boolean callerIsAdmin, UUID callerId, UserRole studentRole, AccountStatus studentStatus,
                                     UUID createdBy, boolean knownToCaller) {
-        if (studentRole != UserRole.STUDENT || studentStatus == AccountStatus.DEACTIVATED) return false;
+        if (studentRole != UserRole.PARTICIPANT || studentStatus == AccountStatus.DEACTIVATED) return false;
         if (callerIsAdmin || studentStatus == AccountStatus.ACTIVE) return true;
         return knownToCaller || callerId.equals(createdBy);
     }

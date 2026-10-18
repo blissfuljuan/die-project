@@ -31,7 +31,7 @@ public class ProjectViews {
 
     public ProjectView viewOf(UUID projectId, ProjectRole role) {
         ProjectRow p = repo.find(projectId).orElseThrow(AccessPolicy::projectNotFound);
-        var cls = classes.peek(p.classId()).orElseThrow(AccessPolicy::classNotFound);
+        var cls = classes.peek(p.workspaceId()).orElseThrow(AccessPolicy::classNotFound);
         return build(p, role, cls, repo.currentMembers(projectId));
     }
 
@@ -41,9 +41,9 @@ public class ProjectViews {
             staff ? m.studentNumber() : null, m.role().name(), m.joinedAt())).toList();
         boolean meetsMin = p.kind() == ProjectKind.INDIVIDUAL ? members.size() == 1 : members.size() >= cls.teamMinSize();
         List<InvitationView> pending = role.canEdit() && p.kind() == ProjectKind.TEAM ? repo.pendingInvitations(p.id()) : List.of();
-        return new ProjectView(p.id(), p.classId(), p.kind().name(), p.title(), p.description(), p.teamName(), p.status().name(),
+        return new ProjectView(p.id(), p.workspaceId(), p.kind().name(), p.title(), p.description(), p.teamName(), p.status().name(),
             p.version(), p.createdAt(), role.name(), memberViews,
-            new TeamPolicy(cls.teamFormation().name(), cls.teamMinSize(), cls.teamMaxSize(), cls.studentsMayChangeTeams()),
+            new TeamPolicy(cls.teamFormation().name(), cls.teamMinSize(), cls.teamMaxSize(), cls.participantsMayChangeTeams()),
             meetsMin, pending);
     }
 }

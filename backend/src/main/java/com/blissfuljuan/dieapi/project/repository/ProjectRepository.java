@@ -8,7 +8,7 @@ import com.blissfuljuan.dieapi.project.model.ProjectKind;
 import com.blissfuljuan.dieapi.project.model.ProjectRow;
 import com.blissfuljuan.dieapi.project.model.ProjectStatus;
 import com.blissfuljuan.dieapi.project.model.TeamRole;
-import com.blissfuljuan.dieapi.project.view.Classmate;
+import com.blissfuljuan.dieapi.project.view.EligibleParticipant;
 import com.blissfuljuan.dieapi.project.view.HistoryEntry;
 import com.blissfuljuan.dieapi.project.view.InvitationView;
 import com.blissfuljuan.dieapi.project.view.MyInvitation;
@@ -39,12 +39,12 @@ public class ProjectRepository {
 
     // ---- projects ----
 
-    public UUID insert(UUID classId, ProjectKind kind, String title, String description, String teamName, UUID createdBy) {
+    public UUID insert(UUID workspaceId, ProjectKind kind, String title, String description, String teamName, UUID createdBy) {
         return jdbc.sql("""
                 INSERT INTO project (class_id, title, description, kind, team_name, created_by)
                 VALUES (:c, :t, :d, :k, :n, :by) RETURNING id
                 """)
-            .param("c", classId).param("t", title).param("d", description).param("k", kind.name())
+            .param("c", workspaceId).param("t", title).param("d", description).param("k", kind.name())
             .param("n", teamName).param("by", createdBy).query(UUID.class).single();
     }
 
@@ -63,10 +63,10 @@ public class ProjectRepository {
             .query(UUID.class).optional();
     }
 
-    public List<ProjectRow> list(UUID classId, SqlScope scope) {
+    public List<ProjectRow> list(UUID workspaceId, SqlScope scope) {
         return jdbc.sql("SELECT " + PROJECT_COLUMNS + " FROM project p " + scope.join()
                 + " WHERE p.class_id = :c ORDER BY p.created_at, p.id")
-            .params(scope.params()).param("c", classId).query(ProjectRepository::mapProject).list();
+            .params(scope.params()).param("c", workspaceId).query(ProjectRepository::mapProject).list();
     }
 
     public void updateDetails(UUID id, String title, String description, String teamName) {
@@ -88,13 +88,13 @@ public class ProjectRepository {
     }
 
     /** Largest current team size among ACTIVE team projects of the class (0 if none). */
-    public int maxActiveTeamSize(UUID classId) {
+    public int maxActiveTeamSize(UUID workspaceId) {
         return jdbc.sql("""
                 SELECT COALESCE(max(n), 0) FROM (
                     SELECT count(*) AS n FROM project p JOIN project_member m ON m.project_id = p.id AND m.left_at IS NULL
                     WHERE p.class_id = :c AND p.kind = 'TEAM' AND p.status = 'ACTIVE' GROUP BY p.id) sizes
                 """)
-            .param("c", classId).query(Integer.class).single();
+            .param("c", workspaceId).query(Integer.class).single();
     }
 
     // ---- members ----
@@ -142,21 +142,21 @@ public class ProjectRepository {
     }
 
     /** The ACTIVE project of the class the student currently belongs to, if any. */
-    public Optional<UUID> activeProjectOf(UUID classId, UUID userId) {
+    public Optional<UUID> activeProjectOf(UUID workspaceId, UUID userId) {
         return jdbc.sql("""
                 SELECT p.id FROM project p JOIN project_member m ON m.project_id = p.id AND m.left_at IS NULL
                 WHERE p.class_id = :c AND p.status = 'ACTIVE' AND m.user_id = :u
                 """)
-            .param("c", classId).param("u", userId).query(UUID.class).optional();
+            .param("c", workspaceId).param("u", userId).query(UUID.class).optional();
     }
 
     /** All ACTIVE projects in the class where the student is a current member (normally 0 or 1). */
-    public List<UUID> activeProjectIdsOf(UUID classId, UUID userId) {
+    public List<UUID> activeProjectIdsOf(UUID workspaceId, UUID userId) {
         return jdbc.sql("""
                 SELECT p.id FROM project p JOIN project_member m ON m.project_id = p.id AND m.left_at IS NULL
                 WHERE p.class_id = :c AND p.status = 'ACTIVE' AND m.user_id = :u
                 """)
-            .param("c", classId).param("u", userId).query(UUID.class).list();
+            .param("c", workspaceId).param("u", userId).query(UUID.class).list();
     }
 
     public List<HistoryEntry> history(UUID projectId) {
@@ -173,7 +173,7 @@ public class ProjectRepository {
     }
 
     /** Enrolled students of the class who are on no ACTIVE project, except {@code exclude}. */
-    public List<Classmate> eligibleClassmates(UUID classId, UUID exclude) {
+    public List<EligibleParticipant> eligibleParticipants(UUID workspaceId, UUID exclude) {
         return jdbc.sql("""
                 SELECT u.id, u.first_name, u.last_name FROM enrollment e JOIN app_user u ON u.id = e.student_id
                 WHERE e.class_id = :c AND e.status = 'ENROLLED' AND u.status <> 'DEACTIVATED' AND u.id <> :x
@@ -181,8 +181,8 @@ public class ProjectRepository {
                                   WHERE p.class_id = :c AND p.status = 'ACTIVE' AND m.user_id = u.id)
                 ORDER BY u.last_name, u.first_name, u.id
                 """)
-            .param("c", classId).param("x", exclude)
-            .query((rs, n) -> new Classmate(rs.getObject("id", UUID.class), rs.getString("first_name"), rs.getString("last_name")))
+            .param("c", workspaceId).param("x", exclude)
+            .query((rs, n) -> new EligibleParticipant(rs.getObject("id", UUID.class), rs.getString("first_name"), rs.getString("last_name")))
             .list();
     }
 
@@ -251,13 +251,13 @@ public class ProjectRepository {
     }
 
     /** Cancels the user's pending invitations to projects of the class (optionally keeping one project's). */
-    public int cancelPendingForUserInClass(UUID classId, UUID userId) {
+    public int cancelPendingForUserInClass(UUID workspaceId, UUID userId) {
         return jdbc.sql("""
                 UPDATE team_invitation SET status = 'CANCELLED', responded_at = now()
                 WHERE invited_user_id = :u AND status = 'PENDING'
                   AND project_id IN (SELECT id FROM project WHERE class_id = :c)
                 """)
-            .param("u", userId).param("c", classId).update();
+            .param("u", userId).param("c", workspaceId).update();
     }
 
     public int cancelAllPendingForProject(UUID projectId) {

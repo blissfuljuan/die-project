@@ -29,7 +29,7 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
 
     UUID adminId;
     UUID instructorId;
-    UUID studentId;
+    UUID participantId;
 
     @BeforeEach
     void seed() {
@@ -37,8 +37,8 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
         jdbc.update("DELETE FROM login_attempt");
         jdbc.update("DELETE FROM app_user");
         adminId = insertUser("admin@example.edu", "ADMIN", null);
-        instructorId = insertUser("instructor@example.edu", "INSTRUCTOR", null);
-        studentId = insertUser("student@example.edu", "STUDENT", "2024-0001");
+        instructorId = insertUser("instructor@example.edu", "COORDINATOR", null);
+        participantId = insertUser("student@example.edu", "PARTICIPANT", "2024-0001");
     }
 
     private UUID insertUser(String email, String role, String studentNumber) {
@@ -80,7 +80,7 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
     private static String body(MvcResult r) throws Exception { return r.getResponse().getContentAsString(); }
 
     private String createInstructorJson(String email) {
-        return "{\"role\":\"INSTRUCTOR\",\"lastName\":\"Reyes\",\"firstName\":\"Ana\",\"email\":\"" + email + "\"}";
+        return "{\"role\":\"COORDINATOR\",\"lastName\":\"Reyes\",\"firstName\":\"Ana\",\"email\":\"" + email + "\"}";
     }
 
     // ---- authorization ----
@@ -89,7 +89,7 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
     void onlyAdminsMayManageAccounts() throws Exception {
         Cookie instructor = loginCookie("instructor@example.edu");
         Cookie student = loginCookie("student@example.edu");
-        String someUser = "/api/v1/users/" + studentId;
+        String someUser = "/api/v1/users/" + participantId;
 
         for (Cookie c : List.of(instructor, student)) {
             assertThat(status(send("GET", "/api/v1/users", c, null))).isEqualTo(403);
@@ -129,22 +129,22 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
     void createValidatesRoleSpecificIdentityAndRejectsDuplicates() throws Exception {
         Cookie admin = loginCookie("admin@example.edu");
         assertThat(status(send("POST", "/api/v1/users", admin,
-            "{\"role\":\"STUDENT\",\"lastName\":\"A\",\"firstName\":\"B\"}"))).isEqualTo(400);
+            "{\"role\":\"PARTICIPANT\",\"lastName\":\"A\",\"firstName\":\"B\"}"))).isEqualTo(400);
         assertThat(status(send("POST", "/api/v1/users", admin,
-            "{\"role\":\"INSTRUCTOR\",\"lastName\":\"A\",\"firstName\":\"B\"}"))).isEqualTo(400);
+            "{\"role\":\"COORDINATOR\",\"lastName\":\"A\",\"firstName\":\"B\"}"))).isEqualTo(400);
         assertThat(status(send("POST", "/api/v1/users", admin,
             "{\"role\":\"WIZARD\",\"lastName\":\"A\",\"firstName\":\"B\",\"email\":\"w@example.edu\"}"))).isEqualTo(400);
         assertThat(status(send("POST", "/api/v1/users", admin, createInstructorJson("instructor@example.edu"))))
             .isEqualTo(409);
         assertThat(status(send("POST", "/api/v1/users", admin,
-            "{\"role\":\"STUDENT\",\"studentNumber\":\"2024-0001\",\"lastName\":\"A\",\"firstName\":\"B\"}")))
+            "{\"role\":\"PARTICIPANT\",\"studentNumber\":\"2024-0001\",\"lastName\":\"A\",\"firstName\":\"B\"}")))
             .isEqualTo(409);
     }
 
     @Test
     void listSupportsFiltersAndPaging() throws Exception {
         Cookie admin = loginCookie("admin@example.edu");
-        MvcResult r = send("GET", "/api/v1/users?role=INSTRUCTOR&size=10", admin, null);
+        MvcResult r = send("GET", "/api/v1/users?role=COORDINATOR&size=10", admin, null);
         assertThat(status(r)).isEqualTo(200);
         assertThat((Integer) JsonPath.read(body(r), "$.total")).isEqualTo(1);
         assertThat((String) JsonPath.read(body(r), "$.items[0].email")).isEqualTo("instructor@example.edu");
@@ -191,7 +191,7 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
         String self = "/api/v1/users/" + adminId;
         assertThat(status(send("POST", self + "/deactivate", admin, null))).isEqualTo(409);
         assertThat(status(send("POST", self + "/reset-credentials", admin, null))).isEqualTo(409);
-        assertThat(status(send("PATCH", self, admin, "{\"version\":0,\"role\":\"INSTRUCTOR\"}"))).isEqualTo(409);
+        assertThat(status(send("PATCH", self, admin, "{\"version\":0,\"role\":\"COORDINATOR\"}"))).isEqualTo(409);
         assertThat(status(send("GET", "/api/v1/auth/me", admin, null))).isEqualTo(200);
     }
 
@@ -234,7 +234,7 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(send("PATCH", url, admin, "{\"firstName\":\"X\"}"))).isEqualTo(400);
 
         long version = jdbc.queryForObject("SELECT version FROM app_user WHERE id = ?", Long.class, instructorId);
-        assertThat(status(send("PATCH", url, admin, "{\"version\":" + version + ",\"role\":\"STUDENT\"}"))).isEqualTo(400);
+        assertThat(status(send("PATCH", url, admin, "{\"version\":" + version + ",\"role\":\"PARTICIPANT\"}"))).isEqualTo(400);
     }
 
     @Test
@@ -252,7 +252,7 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
         Cookie admin = loginCookie("admin@example.edu");
         Cookie student = loginCookie("student@example.edu");
 
-        MvcResult first = send("POST", "/api/v1/users/" + studentId + "/reset-credentials", admin, null);
+        MvcResult first = send("POST", "/api/v1/users/" + participantId + "/reset-credentials", admin, null);
         assertThat(status(first)).isEqualTo(200);
         assertThat(first.getResponse().getHeader("Cache-Control")).contains("no-store");
         String firstSecret = JsonPath.read(body(first), "$.temporaryCredential");
@@ -261,20 +261,20 @@ class AccountManagementIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(send("GET", "/api/v1/auth/me", student, null))).isEqualTo(401);
         assertThat(status(login("student@example.edu", PASSWORD))).isEqualTo(401);
 
-        MvcResult second = send("POST", "/api/v1/users/" + studentId + "/reset-credentials", admin, null);
+        MvcResult second = send("POST", "/api/v1/users/" + participantId + "/reset-credentials", admin, null);
         String secondSecret = JsonPath.read(body(second), "$.temporaryCredential");
         assertThat(secondSecret).isNotEqualTo(firstSecret);
 
         Integer live = jdbc.queryForObject(
-            "SELECT count(*) FROM temp_credential WHERE user_id = ? AND invalidated_at IS NULL", Integer.class, studentId);
+            "SELECT count(*) FROM temp_credential WHERE user_id = ? AND invalidated_at IS NULL", Integer.class, participantId);
         assertThat(live).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT password_hash FROM app_user WHERE id = ?", String.class, studentId)).isNull();
+        assertThat(jdbc.queryForObject("SELECT password_hash FROM app_user WHERE id = ?", String.class, participantId)).isNull();
     }
 
     @Test
     void resetOfDeactivatedAccountIsRejected() throws Exception {
         Cookie admin = loginCookie("admin@example.edu");
-        send("POST", "/api/v1/users/" + studentId + "/deactivate", admin, null);
-        assertThat(status(send("POST", "/api/v1/users/" + studentId + "/reset-credentials", admin, null))).isEqualTo(409);
+        send("POST", "/api/v1/users/" + participantId + "/deactivate", admin, null);
+        assertThat(status(send("POST", "/api/v1/users/" + participantId + "/reset-credentials", admin, null))).isEqualTo(409);
     }
 }

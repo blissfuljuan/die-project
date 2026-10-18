@@ -37,9 +37,9 @@ public class RosterImportQueryService {
     }
 
     @Transactional(readOnly = true)
-    public List<ImportView> list(AppUserDetails user, UUID classId) {
-        policy.requireClassManage(user, classId);
-        return repo.listForClass(classId).stream().map(this::view).toList();
+    public List<ImportView> list(AppUserDetails user, UUID workspaceId) {
+        policy.requireClassManage(user, workspaceId);
+        return repo.listForClass(workspaceId).stream().map(this::view).toList();
     }
 
     @Transactional(readOnly = true)
@@ -60,7 +60,7 @@ public class RosterImportQueryService {
     ImportHeader header(AppUserDetails user, UUID importId, boolean lock) {
         ImportHeader h = repo.find(importId, lock).orElseThrow(RosterImportQueryService::importNotFound);
         try {
-            policy.requireClassManage(user, h.classId());
+            policy.requireClassManage(user, h.workspaceId());
         } catch (ApiException e) {
             throw importNotFound();
         }
@@ -68,7 +68,7 @@ public class RosterImportQueryService {
     }
 
     ImportView view(ImportHeader h) {
-        return new ImportView(h.id(), h.classId(), h.fileName(), h.status().name(), h.createdAt(), h.committedAt(),
+        return new ImportView(h.id(), h.workspaceId(), h.fileName(), h.status().name(), h.createdAt(), h.committedAt(),
             repo.summary(h.id()));
     }
 

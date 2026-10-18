@@ -56,8 +56,8 @@ public class ProjectMutation {
 
     /** Class row first, then project row; the project must be ACTIVE in an ACTIVE class. */
     public LockedProject lockActive(UUID projectId) {
-        UUID classId = repo.classIdOf(projectId).orElseThrow(AccessPolicy::projectNotFound);
-        var cls = lockWritableClass(classId);
+        UUID workspaceId = repo.classIdOf(projectId).orElseThrow(AccessPolicy::projectNotFound);
+        var cls = lockWritableClass(workspaceId);
         ProjectRow p = repo.lock(projectId).orElseThrow(AccessPolicy::projectNotFound);
         if (p.status() != ProjectStatus.ACTIVE) {
             throw ApiException.conflict(ErrorCode.PROJECT_ARCHIVED, "The project is archived and read-only");
@@ -67,27 +67,27 @@ public class ProjectMutation {
 
     /** Class and project rows with no status checks (archiving an already archived project is a no-op). */
     private LockedProject lockAnyState(UUID projectId) {
-        UUID classId = repo.classIdOf(projectId).orElseThrow(AccessPolicy::projectNotFound);
-        var cls = classes.lock(classId).orElseThrow(AccessPolicy::classNotFound);
+        UUID workspaceId = repo.classIdOf(projectId).orElseThrow(AccessPolicy::projectNotFound);
+        var cls = classes.lock(workspaceId).orElseThrow(AccessPolicy::classNotFound);
         ProjectRow p = repo.lock(projectId).orElseThrow(AccessPolicy::projectNotFound);
         return new LockedProject(p, cls);
     }
 
     /** Like lockActive but only the class must be writable, so the caller can report precise reasons. */
     public LockedProject lockForInvitee(UUID projectId) {
-        UUID classId = repo.classIdOf(projectId).orElseThrow(AccessPolicy::projectNotFound);
-        var cls = classes.lock(classId).orElseThrow(AccessPolicy::classNotFound);
+        UUID workspaceId = repo.classIdOf(projectId).orElseThrow(AccessPolicy::projectNotFound);
+        var cls = classes.lock(workspaceId).orElseThrow(AccessPolicy::classNotFound);
         ProjectRow p = repo.lock(projectId).orElseThrow(AccessPolicy::projectNotFound);
         if (cls.status() == ClassStatus.ARCHIVED) {
-            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The class is archived");
+            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The workspace is archived");
         }
         return new LockedProject(p, cls);
     }
 
-    public LockedClass lockWritableClass(UUID classId) {
-        var cls = classes.lock(classId).orElseThrow(AccessPolicy::classNotFound);
+    public LockedClass lockWritableClass(UUID workspaceId) {
+        var cls = classes.lock(workspaceId).orElseThrow(AccessPolicy::classNotFound);
         if (cls.status() == ClassStatus.ARCHIVED) {
-            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The class is archived and read-only");
+            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The workspace is archived and read-only");
         }
         return cls;
     }

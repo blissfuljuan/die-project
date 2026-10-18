@@ -10,7 +10,7 @@ import com.blissfuljuan.dieapi.account.model.AccountStatus;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.academic.view.ClassPage;
 import com.blissfuljuan.dieapi.academic.view.ClassView;
-import com.blissfuljuan.dieapi.academic.view.ClassView.InstructorRef;
+import com.blissfuljuan.dieapi.academic.view.ClassView.CoordinatorRef;
 import com.blissfuljuan.dieapi.academic.view.EnrollmentView;
 import com.blissfuljuan.dieapi.access.model.SqlScope;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -21,7 +21,7 @@ import java.sql.SQLException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/** SQL for classes, instructors and enrollments. No authorization decisions here except the SqlScope it is given. */
+/** SQL for classes, coordinators and enrollments. No authorization decisions here except the SqlScope it is given. */
 @Repository
 public class ClassRepository {
 
@@ -65,13 +65,13 @@ public class ClassRepository {
                 + " ORDER BY c.academic_year DESC, c.semester, c.subject_code, c.section, c.id LIMIT :limit OFFSET :offset")
             .params(params).param("limit", size).param("offset", (long) page * size)
             .query(ClassRepository::mapClass).list();
-        return new ClassPage(withInstructors(items), page, size, total);
+        return new ClassPage(withCoordinators(items), page, size, total);
     }
 
     public Optional<ClassView> find(UUID id) {
         return jdbc.sql("SELECT " + CLASS_COLUMNS + " FROM academic_class c WHERE c.id = :id")
             .param("id", id).query(ClassRepository::mapClass).optional()
-            .map(v -> withInstructors(List.of(v)).get(0));
+            .map(v -> withCoordinators(List.of(v)).get(0));
     }
 
     public Optional<LockedClass> lock(UUID id) {
@@ -106,7 +106,7 @@ public class ClassRepository {
             .param("y", c.academicYear()).param("sem", c.semester()).param("code", c.subjectCode())
             .param("name", c.subjectName()).param("sec", c.section()).param("tf", c.teamFormation().name())
             .param("min", c.teamMinSize()).param("max", c.teamMaxSize())
-            .param("chg", c.studentsMayChangeTeams()).param("by", c.createdBy())
+            .param("chg", c.participantsMayChangeTeams()).param("by", c.createdBy())
             .query(UUID.class).single();
     }
 
@@ -121,7 +121,7 @@ public class ClassRepository {
             .param("id", id).param("y", c.academicYear()).param("sem", c.semester())
             .param("code", c.subjectCode()).param("name", c.subjectName()).param("sec", c.section())
             .param("tf", c.teamFormation().name()).param("min", c.teamMinSize()).param("max", c.teamMaxSize())
-            .param("chg", c.studentsMayChangeTeams())
+            .param("chg", c.participantsMayChangeTeams())
             .update();
     }
 
@@ -130,32 +130,32 @@ public class ClassRepository {
             .param("id", id).param("s", status.name()).update();
     }
 
-    // ---- instructors ----
+    // ---- coordinators ----
 
-    public List<UUID> instructorIds(UUID classId) {
+    public List<UUID> coordinatorIds(UUID workspaceId) {
         return jdbc.sql("SELECT user_id FROM class_instructor WHERE class_id = :c ORDER BY user_id")
-            .param("c", classId).query(UUID.class).list();
+            .param("c", workspaceId).query(UUID.class).list();
     }
 
-    public void replaceInstructors(UUID classId, Collection<UUID> instructorIds) {
-        jdbc.sql("DELETE FROM class_instructor WHERE class_id = :c").param("c", classId).update();
-        for (UUID id : instructorIds) {
+    public void replaceInstructors(UUID workspaceId, Collection<UUID> coordinatorIds) {
+        jdbc.sql("DELETE FROM class_instructor WHERE class_id = :c").param("c", workspaceId).update();
+        for (UUID id : coordinatorIds) {
             jdbc.sql("INSERT INTO class_instructor (class_id, user_id) VALUES (:c, :u)")
-                .param("c", classId).param("u", id).update();
+                .param("c", workspaceId).param("u", id).update();
         }
     }
 
-    /** Number of the given ids that are real, non-deactivated INSTRUCTOR accounts. */
+    /** Number of the given ids that are real, non-deactivated COORDINATOR accounts. */
     public long countAssignableInstructors(Collection<UUID> ids) {
         if (ids.isEmpty()) return 0;
-        return jdbc.sql("SELECT count(*) FROM app_user WHERE id IN (:ids) AND role = 'INSTRUCTOR' AND status <> 'DEACTIVATED'")
+        return jdbc.sql("SELECT count(*) FROM app_user WHERE id IN (:ids) AND role = 'COORDINATOR' AND status <> 'DEACTIVATED'")
             .param("ids", ids).query(Long.class).single();
     }
 
-    private List<ClassView> withInstructors(List<ClassView> classes) {
+    private List<ClassView> withCoordinators(List<ClassView> classes) {
         if (classes.isEmpty()) return classes;
         List<UUID> ids = classes.stream().map(ClassView::id).toList();
-        Map<UUID, List<InstructorRef>> byClass = new HashMap<>();
+        Map<UUID, List<CoordinatorRef>> byClass = new HashMap<>();
         jdbc.sql("""
                 SELECT ci.class_id, u.id, u.first_name, u.last_name
                 FROM class_instructor ci JOIN app_user u ON u.id = ci.user_id
@@ -164,17 +164,17 @@ public class ClassRepository {
             .param("ids", ids)
             .query((rs, n) -> {
                 byClass.computeIfAbsent(rs.getObject("class_id", UUID.class), k -> new ArrayList<>())
-                    .add(new InstructorRef(rs.getObject("id", UUID.class), rs.getString("first_name"),
+                    .add(new CoordinatorRef(rs.getObject("id", UUID.class), rs.getString("first_name"),
                         rs.getString("last_name")));
                 return 0;
             }).list();
-        return classes.stream().map(c -> c.withInstructors(byClass.getOrDefault(c.id(), List.of())))
+        return classes.stream().map(c -> c.withCoordinators(byClass.getOrDefault(c.id(), List.of())))
             .collect(Collectors.toList());
     }
 
     // ---- enrollments ----
 
-    public List<EnrollmentView> enrollments(UUID classId, boolean includeRemoved) {
+    public List<EnrollmentView> enrollments(UUID workspaceId, boolean includeRemoved) {
         return jdbc.sql("""
                 SELECT u.id, u.student_number, u.last_name, u.first_name, u.middle_name, u.email,
                        u.status AS account_status, e.program, e.section, e.status, e.enrolled_at, e.removed_at
@@ -182,7 +182,7 @@ public class ClassRepository {
                 WHERE e.class_id = :c AND (:all OR e.status = 'ENROLLED')
                 ORDER BY u.last_name, u.first_name, u.id
                 """)
-            .param("c", classId).param("all", includeRemoved)
+            .param("c", workspaceId).param("all", includeRemoved)
             .query((rs, n) -> new EnrollmentView(rs.getObject("id", UUID.class), rs.getString("student_number"),
                 rs.getString("last_name"), rs.getString("first_name"), rs.getString("middle_name"),
                 rs.getString("email"), rs.getString("account_status"), rs.getString("program"),
@@ -210,36 +210,36 @@ public class ClassRepository {
     }
 
     /** True if the student is (or was) enrolled in any class the instructor is assigned to. */
-    public boolean studentKnownToInstructor(UUID instructorId, UUID studentId) {
+    public boolean studentKnownToInstructor(UUID instructorId, UUID participantId) {
         return jdbc.sql("""
                 SELECT 1 FROM enrollment e JOIN class_instructor ci ON ci.class_id = e.class_id
                 WHERE ci.user_id = :i AND e.student_id = :s LIMIT 1
                 """)
-            .param("i", instructorId).param("s", studentId).query(Integer.class).optional().isPresent();
+            .param("i", instructorId).param("s", participantId).query(Integer.class).optional().isPresent();
     }
 
     /** @return current enrollment status for the pair, if a row exists. */
-    public Optional<EnrollmentStatus> enrollmentStatus(UUID classId, UUID studentId) {
+    public Optional<EnrollmentStatus> enrollmentStatus(UUID workspaceId, UUID participantId) {
         return jdbc.sql("SELECT status FROM enrollment WHERE class_id = :c AND student_id = :s FOR UPDATE")
-            .param("c", classId).param("s", studentId).query(String.class).optional().map(EnrollmentStatus::valueOf);
+            .param("c", workspaceId).param("s", participantId).query(String.class).optional().map(EnrollmentStatus::valueOf);
     }
 
-    public void insertEnrollment(UUID classId, UUID studentId, String program, String section) {
+    public void insertEnrollment(UUID workspaceId, UUID participantId, String program, String section) {
         jdbc.sql("INSERT INTO enrollment (class_id, student_id, program, section) VALUES (:c, :s, :p, :sec)")
-            .param("c", classId).param("s", studentId).param("p", program).param("sec", section).update();
+            .param("c", workspaceId).param("s", participantId).param("p", program).param("sec", section).update();
     }
 
-    public void reinstateEnrollment(UUID classId, UUID studentId, String program, String section) {
+    public void reinstateEnrollment(UUID workspaceId, UUID participantId, String program, String section) {
         jdbc.sql("""
                 UPDATE enrollment SET status = 'ENROLLED', removed_at = NULL, enrolled_at = now(),
                        program = :p, section = :sec
                 WHERE class_id = :c AND student_id = :s
                 """)
-            .param("c", classId).param("s", studentId).param("p", program).param("sec", section).update();
+            .param("c", workspaceId).param("s", participantId).param("p", program).param("sec", section).update();
     }
 
-    public void removeEnrollment(UUID classId, UUID studentId) {
+    public void removeEnrollment(UUID workspaceId, UUID participantId) {
         jdbc.sql("UPDATE enrollment SET status = 'REMOVED', removed_at = now() WHERE class_id = :c AND student_id = :s")
-            .param("c", classId).param("s", studentId).update();
+            .param("c", workspaceId).param("s", participantId).update();
     }
 }

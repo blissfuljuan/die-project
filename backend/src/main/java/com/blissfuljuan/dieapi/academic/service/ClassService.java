@@ -41,16 +41,16 @@ public class ClassService {
     private final AccessPolicy policy;
     private final ApplicationEventPublisher events;
     private final ClassLocks locks;
-    private final ClassInstructorService instructors;
+    private final ClassInstructorService coordinators;
     private final ClassTeamStats teamStats;
 
     public ClassService(ClassRepository repo, AccessPolicy policy, ApplicationEventPublisher events, ClassLocks locks,
-                        ClassInstructorService instructors, ClassTeamStats teamStats) {
+                        ClassInstructorService coordinators, ClassTeamStats teamStats) {
         this.repo = repo;
         this.policy = policy;
         this.events = events;
         this.locks = locks;
-        this.instructors = instructors;
+        this.coordinators = coordinators;
         this.teamStats = teamStats;
     }
 
@@ -69,9 +69,9 @@ public class ClassService {
     }
 
     @Transactional(readOnly = true)
-    public ClassView get(AppUserDetails user, UUID classId) {
-        policy.requireClassView(user, classId);
-        return repo.find(classId).orElseThrow(AccessPolicy::classNotFound);
+    public ClassView get(AppUserDetails user, UUID workspaceId) {
+        policy.requireClassView(user, workspaceId);
+        return repo.find(workspaceId).orElseThrow(AccessPolicy::classNotFound);
     }
 
     // ---- class lifecycle ----
@@ -80,37 +80,37 @@ public class ClassService {
     public ClassView create(AppUserDetails user, CreateClass req) {
         List<UUID> teaching;
         if (user.role() == UserRole.ADMIN) {
-            teaching = distinct(req.instructorIds());
+            teaching = distinct(req.coordinatorIds());
             if (teaching.isEmpty()) {
-                throw ApiException.badRequest(ErrorCode.INSTRUCTORS_REQUIRED, "instructorIds must list at least one instructor");
+                throw ApiException.badRequest(ErrorCode.COORDINATORS_REQUIRED, "coordinatorIds must list at least one coordinator");
             }
         } else {
             teaching = List.of(user.getId()); // an instructor creating a class teaches it
         }
-        instructors.requireAssignable(teaching);
+        coordinators.requireAssignable(teaching);
 
         NewClass fields = fields(
             required(req.academicYear(), "academicYear"), required(req.semester(), "semester"),
             required(req.subjectCode(), "subjectCode"), required(req.subjectName(), "subjectName"),
             required(req.section(), "section"),
-            req.teamFormation() == null ? TeamFormation.INSTRUCTOR_ASSIGNED.name() : req.teamFormation(),
+            req.teamFormation() == null ? TeamFormation.COORDINATOR_ASSIGNED.name() : req.teamFormation(),
             req.teamMinSize() == null ? 1 : req.teamMinSize(),
             req.teamMaxSize() == null ? 5 : req.teamMaxSize(),
-            Boolean.TRUE.equals(req.studentsMayChangeTeams()), user.getId());
+            Boolean.TRUE.equals(req.participantsMayChangeTeams()), user.getId());
 
         UUID id = repo.insert(fields);
         repo.replaceInstructors(id, teaching);
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_CREATED, AuditResource.CLASS, id.toString(), Map.of("instructors", teaching.size())));
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_CREATED, AuditResource.CLASS, id.toString(), Map.of("coordinators", teaching.size())));
         return repo.find(id).orElseThrow();
     }
 
     @Transactional
-    public ClassView update(AppUserDetails user, UUID classId, UpdateClass req) {
+    public ClassView update(AppUserDetails user, UUID workspaceId, UpdateClass req) {
         if (req.version() == null) throw ApiException.badRequest(ErrorCode.VERSION_REQUIRED, "version is required");
-        policy.requireClassManage(user, classId);
-        LockedClass cur = locks.lockWritable(classId);
+        policy.requireClassManage(user, workspaceId);
+        LockedClass cur = locks.lockWritable(workspaceId);
         if (cur.version() != req.version()) {
-            throw ApiException.conflict(ErrorCode.CLASS_VERSION_CONFLICT, "The class was modified by someone else; reload and retry");
+            throw ApiException.conflict(ErrorCode.CLASS_VERSION_CONFLICT, "The workspace was modified by someone else; reload and retry");
         }
         NewClass next = fields(
             pick(req.academicYear(), cur.academicYear(), "academicYear"), pick(req.semester(), cur.semester(), "semester"),
@@ -119,40 +119,40 @@ public class ClassService {
             req.teamFormation() == null ? cur.teamFormation().name() : req.teamFormation(),
             req.teamMinSize() == null ? cur.teamMinSize() : req.teamMinSize(),
             req.teamMaxSize() == null ? cur.teamMaxSize() : req.teamMaxSize(),
-            req.studentsMayChangeTeams() == null ? cur.studentsMayChangeTeams() : req.studentsMayChangeTeams(),
+            req.participantsMayChangeTeams() == null ? cur.participantsMayChangeTeams() : req.participantsMayChangeTeams(),
             null);
         // Team-policy changes must not silently invalidate teams that already exist.
-        int largestTeam = teamStats.largestActiveTeamSize(classId);
+        int largestTeam = teamStats.largestActiveTeamSize(workspaceId);
         if (next.teamMaxSize() < largestTeam) {
             throw ApiException.conflict(ErrorCode.TEAM_SIZE_BELOW_EXISTING_TEAM, "An existing team has " + largestTeam
                 + " members, which exceeds the new maximum of " + next.teamMaxSize() + "; adjust that team first");
         }
-        repo.update(classId, next);
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_UPDATED, AuditResource.CLASS, classId.toString(), Map.of()));
-        return repo.find(classId).orElseThrow();
+        repo.update(workspaceId, next);
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_UPDATED, AuditResource.CLASS, workspaceId.toString(), Map.of()));
+        return repo.find(workspaceId).orElseThrow();
     }
 
     @Transactional
-    public ClassView archive(AppUserDetails user, UUID classId) {
-        policy.requireClassManage(user, classId);
-        LockedClass cur = locks.lock(classId);
+    public ClassView archive(AppUserDetails user, UUID workspaceId) {
+        policy.requireClassManage(user, workspaceId);
+        LockedClass cur = locks.lock(workspaceId);
         if (cur.status() != ClassStatus.ARCHIVED) {
-            repo.setStatus(classId, ClassStatus.ARCHIVED);
-            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_ARCHIVED, AuditResource.CLASS, classId.toString(), Map.of()));
+            repo.setStatus(workspaceId, ClassStatus.ARCHIVED);
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_ARCHIVED, AuditResource.CLASS, workspaceId.toString(), Map.of()));
         }
-        return repo.find(classId).orElseThrow();
+        return repo.find(workspaceId).orElseThrow();
     }
 
     /** Admin only (enforced on the controller). */
     @Transactional
-    public ClassView unarchive(AppUserDetails user, UUID classId) {
-        policy.requireClassView(user, classId);
-        LockedClass cur = locks.lock(classId);
+    public ClassView unarchive(AppUserDetails user, UUID workspaceId) {
+        policy.requireClassView(user, workspaceId);
+        LockedClass cur = locks.lock(workspaceId);
         if (cur.status() == ClassStatus.ARCHIVED) {
-            repo.setStatus(classId, ClassStatus.ACTIVE);
-            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_UNARCHIVED, AuditResource.CLASS, classId.toString(), Map.of()));
+            repo.setStatus(workspaceId, ClassStatus.ACTIVE);
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.CLASS_UNARCHIVED, AuditResource.CLASS, workspaceId.toString(), Map.of()));
         }
-        return repo.find(classId).orElseThrow();
+        return repo.find(workspaceId).orElseThrow();
     }
 
     private static NewClass fields(String year, String semester, String code, String name,
@@ -160,7 +160,7 @@ public class ClassService {
                                    boolean mayChange, UUID createdBy) {
         TeamFormation parsedFormation = TeamFormation.parse(formation);
         if (parsedFormation == null) {
-            throw ApiException.badRequest(ErrorCode.INVALID_TEAM_FORMATION, "teamFormation must be STUDENT_FORMED or INSTRUCTOR_ASSIGNED");
+            throw ApiException.badRequest(ErrorCode.INVALID_TEAM_FORMATION, "teamFormation must be PARTICIPANT_FORMED or COORDINATOR_ASSIGNED");
         }
         if (min < 1 || max < min || max > 50) {
             throw ApiException.badRequest(ErrorCode.INVALID_TEAM_SIZE, "Team sizes must satisfy 1 <= min <= max <= 50");

@@ -49,7 +49,7 @@ class PasswordIntegrationTest extends PostgresIntegrationTest {
     private UUID insertUser(String email, String status, boolean withPassword) {
         return jdbc.queryForObject("""
             INSERT INTO app_user (role, status, last_name, first_name, email, email_verified_at, password_hash)
-            VALUES ('INSTRUCTOR', ?, 'Doe', 'Jane', ?, now(), ?) RETURNING id
+            VALUES ('COORDINATOR', ?, 'Doe', 'Jane', ?, now(), ?) RETURNING id
             """, UUID.class, status, email, withPassword ? encoder.encode(OLD) : null);
     }
 

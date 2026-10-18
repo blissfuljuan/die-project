@@ -48,13 +48,13 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
     void seed() {
         sessions.clear();
         admin = user("admin@x.edu", "ADMIN", "ACTIVE", "Admin", "Root", null, null);
-        instrX = user("x@x.edu", "INSTRUCTOR", "ACTIVE", "Xavier", "Xia", null, null);
-        instrY = user("y@x.edu", "INSTRUCTOR", "ACTIVE", "Yates", "Yan", null, null);
-        pendingX = user(null, "STUDENT", "PENDING_ACTIVATION", "Pend", "Pat", "P-X", instrX);
-        pendingByAdmin = user(null, "STUDENT", "PENDING_ACTIVATION", "Adm", "Ann", "P-A", admin);
-        activeStudent = user("active@x.edu", "STUDENT", "ACTIVE", "Active", "Alex", "A-1", null);
-        goneStudent = user("gone@x.edu", "STUDENT", "DEACTIVATED", "Gone", "Guy", "G-1", null);
-        staffWithNumber = user("t@x.edu", "INSTRUCTOR", "ACTIVE", "Teach", "Tom", "T-1", null);
+        instrX = user("x@x.edu", "COORDINATOR", "ACTIVE", "Xavier", "Xia", null, null);
+        instrY = user("y@x.edu", "COORDINATOR", "ACTIVE", "Yates", "Yan", null, null);
+        pendingX = user(null, "PARTICIPANT", "PENDING_ACTIVATION", "Pend", "Pat", "P-X", instrX);
+        pendingByAdmin = user(null, "PARTICIPANT", "PENDING_ACTIVATION", "Adm", "Ann", "P-A", admin);
+        activeStudent = user("active@x.edu", "PARTICIPANT", "ACTIVE", "Active", "Alex", "A-1", null);
+        goneStudent = user("gone@x.edu", "PARTICIPANT", "DEACTIVATED", "Gone", "Guy", "G-1", null);
+        staffWithNumber = user("t@x.edu", "COORDINATOR", "ACTIVE", "Teach", "Tom", "T-1", null);
         classX = clazz("CSX", instrX);
         classY = clazz("CSY", instrY);
         enroll(classX, pendingX);
@@ -84,8 +84,8 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
         return id;
     }
 
-    private void enroll(UUID classId, UUID student) {
-        jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", classId, student);
+    private void enroll(UUID workspaceId, UUID student) {
+        jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", workspaceId, student);
     }
 
     private Cookie as(UUID user) throws Exception {
@@ -112,8 +112,8 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
         return mvc.perform(req).andReturn();
     }
 
-    private MvcResult upload(UUID actor, UUID classId, String csv) throws Exception {
-        return mvc.perform(multipart("/api/v1/classes/" + classId + "/roster-imports")
+    private MvcResult upload(UUID actor, UUID workspaceId, String csv) throws Exception {
+        return mvc.perform(multipart("/api/v1/workspaces/" + workspaceId + "/roster-imports")
             .file(new MockMultipartFile("file", "roster.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8)))
             .with(csrf()).cookie(as(actor))).andReturn();
     }
@@ -132,17 +132,17 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void anotherInstructorCannotEnrollImportOrReissueAPendingStudentOfAnotherClass() throws Exception {
-        String enrollY = "/api/v1/classes/" + classY + "/enrollments";
+        String enrollY = "/api/v1/workspaces/" + classY + "/enrollments";
         String missing = detail(call(instrY, HttpMethod.POST, enrollY, "{\"studentNumber\":\"NOPE\",\"lastName\":\"Nobody\"}"));
 
         // Manual enrollment: by number + correct last name, and by UUID.
         MvcResult byNumber = call(instrY, HttpMethod.POST, enrollY, "{\"studentNumber\":\"P-X\",\"lastName\":\"Pend\"}");
         assertThat(status(byNumber)).isEqualTo(404);
         assertThat(detail(byNumber)).isEqualTo(missing);
-        assertThat(status(call(instrY, HttpMethod.POST, enrollY, "{\"studentId\":\"" + pendingX + "\"}"))).isEqualTo(404);
-        // Accounts an admin created are not claimable by instructors either (not even by the instructor of the other class).
+        assertThat(status(call(instrY, HttpMethod.POST, enrollY, "{\"participantId\":\"" + pendingX + "\"}"))).isEqualTo(404);
+        // Accounts an admin created are not claimable by coordinators either (not even by the instructor of the other class).
         assertThat(status(call(instrY, HttpMethod.POST, enrollY, "{\"studentNumber\":\"P-A\",\"lastName\":\"Adm\"}"))).isEqualTo(404);
-        assertThat(status(call(instrX, HttpMethod.POST, "/api/v1/classes/" + classX + "/enrollments",
+        assertThat(status(call(instrX, HttpMethod.POST, "/api/v1/workspaces/" + classX + "/enrollments",
             "{\"studentNumber\":\"P-A\",\"lastName\":\"Adm\"}"))).as("created by the admin, not by X").isEqualTo(404);
 
         // Roster import: the row becomes an unusable, skip-only conflict.
@@ -165,9 +165,9 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
 
         // Re-issue needs the student to be enrolled in a class the caller teaches.
         for (UUID target : List.of(pendingX, pendingByAdmin)) {
-            assertThat(status(call(instrY, HttpMethod.POST, "/api/v1/classes/" + classY + "/enrollments/" + target + "/temporary-credential", null)))
+            assertThat(status(call(instrY, HttpMethod.POST, "/api/v1/workspaces/" + classY + "/enrollments/" + target + "/temporary-credential", null)))
                 .as("Y re-issuing for %s", target).isEqualTo(404);
-            assertThat(status(call(instrY, HttpMethod.POST, "/api/v1/classes/" + classX + "/enrollments/" + target + "/temporary-credential", null)))
+            assertThat(status(call(instrY, HttpMethod.POST, "/api/v1/workspaces/" + classX + "/enrollments/" + target + "/temporary-credential", null)))
                 .as("Y using X's class for %s", target).isEqualTo(404);
         }
         assertThat(jdbc.queryForObject("SELECT count(*) FROM enrollment WHERE class_id = ?", Integer.class, classY)).isZero();
@@ -176,15 +176,15 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'TEMP_CREDENTIAL_REISSUED'", Integer.class)).isZero();
 
         // The class that really owns the account can still help a student who lost the sheet.
-        assertThat(status(call(instrX, HttpMethod.POST, "/api/v1/classes/" + classX + "/enrollments/" + pendingX + "/temporary-credential", null))).isEqualTo(200);
+        assertThat(status(call(instrX, HttpMethod.POST, "/api/v1/workspaces/" + classX + "/enrollments/" + pendingX + "/temporary-credential", null))).isEqualTo(200);
     }
 
     @Test
     void anAdminCanPlaceAnAdminCreatedStudentAndOnlyThenTheClassStaffCanHelpThem() throws Exception {
-        String enrollX = "/api/v1/classes/" + classX + "/enrollments";
+        String enrollX = "/api/v1/workspaces/" + classX + "/enrollments";
         assertThat(status(call(admin, HttpMethod.POST, enrollX, "{\"studentNumber\":\"P-A\"}"))).as("admins need no last name").isEqualTo(201);
         assertThat(status(call(instrX, HttpMethod.POST, enrollX + "/" + pendingByAdmin + "/temporary-credential", null))).isEqualTo(200);
-        assertThat(status(call(instrY, HttpMethod.POST, "/api/v1/classes/" + classY + "/enrollments/" + pendingByAdmin + "/temporary-credential", null))).isEqualTo(404);
+        assertThat(status(call(instrY, HttpMethod.POST, "/api/v1/workspaces/" + classY + "/enrollments/" + pendingByAdmin + "/temporary-credential", null))).isEqualTo(404);
     }
 
     // ================= H2: no disclosure of other accounts =================
@@ -240,7 +240,7 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void manualEnrollmentByNumberNeedsTheLastNameAndAllRefusalsLookAlike() throws Exception {
-        String enrollY = "/api/v1/classes/" + classY + "/enrollments";
+        String enrollY = "/api/v1/workspaces/" + classY + "/enrollments";
         assertThat(status(call(instrY, HttpMethod.POST, enrollY, "{\"studentNumber\":\"A-1\"}"))).as("last name required").isEqualTo(400);
 
         String unknown = detail(call(instrY, HttpMethod.POST, enrollY, "{\"studentNumber\":\"ZZZ\",\"lastName\":\"Zed\"}"));
@@ -273,7 +273,7 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void studentNumbersCollideIgnoringCaseInTheApiTheDatabaseAndTheImporter() throws Exception {
-        String create = "{\"role\":\"STUDENT\",\"studentNumber\":\"%s\",\"lastName\":\"L\",\"firstName\":\"F\"}";
+        String create = "{\"role\":\"PARTICIPANT\",\"studentNumber\":\"%s\",\"lastName\":\"L\",\"firstName\":\"F\"}";
         assertThat(status(call(admin, HttpMethod.POST, "/api/v1/users", create.formatted("ab-1")))).isEqualTo(201);
         assertThat(status(call(admin, HttpMethod.POST, "/api/v1/users", create.formatted("AB-1")))).as("same id, other case").isEqualTo(409);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM app_user WHERE lower(student_number) = 'ab-1'", Integer.class)).isEqualTo(1);

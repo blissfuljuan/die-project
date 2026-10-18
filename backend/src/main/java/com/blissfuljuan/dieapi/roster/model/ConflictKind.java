@@ -8,7 +8,7 @@ import com.blissfuljuan.dieapi.common.util.Enums;
  */
 public enum ConflictKind {
     ID_NAME_MISMATCH, ID_REPEATED_WITH_DIFFERENT_NAME, ID_UNAVAILABLE,
-    NOT_A_STUDENT, ACCOUNT_DEACTIVATED, EMAIL_TAKEN, EMAIL_REPEATED_IN_FILE;
+    NOT_A_PARTICIPANT, ACCOUNT_DEACTIVATED, EMAIL_TAKEN, EMAIL_REPEATED_IN_FILE;
 
     /** Exact lookup by name, or null. */
     public static ConflictKind parse(String text) {

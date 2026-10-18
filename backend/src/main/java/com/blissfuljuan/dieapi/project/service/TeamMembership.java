@@ -70,11 +70,11 @@ public class TeamMembership {
      * A student who is no longer enrolled leaves every project of that class and loses pending invitations.
      * Called from ClassEnrollmentService.unenroll (class row already locked).
      */
-    public void onStudentRemovedFromClass(UUID classId, UUID studentId, UUID actor) {
-        repo.cancelPendingForUserInClass(classId, studentId);
-        for (UUID projectId : repo.activeProjectIdsOf(classId, studentId)) {
+    public void onStudentRemovedFromClass(UUID workspaceId, UUID participantId, UUID actor) {
+        repo.cancelPendingForUserInClass(workspaceId, participantId);
+        for (UUID projectId : repo.activeProjectIdsOf(workspaceId, participantId)) {
             repo.lock(projectId);
-            remove(projectId, studentId, actor, "removed from class");
+            remove(projectId, participantId, actor, "removed from workspace");
         }
     }
 }

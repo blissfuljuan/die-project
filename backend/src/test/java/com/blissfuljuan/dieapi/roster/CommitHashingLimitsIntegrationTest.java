@@ -73,7 +73,7 @@ class CommitHashingLimitsIntegrationTest extends PostgresIntegrationTest {
     private UUID instructor(String email) {
         return jdbc.queryForObject("""
             INSERT INTO app_user (role, status, last_name, first_name, email, email_verified_at, password_hash)
-            VALUES ('INSTRUCTOR', 'ACTIVE', ?, 'T', ?, now(), ?) RETURNING id
+            VALUES ('COORDINATOR', 'ACTIVE', ?, 'T', ?, now(), ?) RETURNING id
             """, UUID.class, email.substring(0, 2), email, passwordEncoder.encode(PASSWORD));
     }
 
@@ -95,10 +95,10 @@ class CommitHashingLimitsIntegrationTest extends PostgresIntegrationTest {
             .map(h -> new Cookie("SESSION", h.substring("SESSION=".length(), h.indexOf(';')))).findFirst().orElseThrow();
     }
 
-    private UUID uploadRoster(Cookie cookie, UUID classId, String prefix, int students) throws Exception {
+    private UUID uploadRoster(Cookie cookie, UUID workspaceId, String prefix, int students) throws Exception {
         StringBuilder csv = new StringBuilder(HEADER);
         for (int i = 0; i < students; i++) csv.append(prefix).append('-').append(i).append(",Last").append(i).append(",First\n");
-        MvcResult r = mvc.perform(multipart("/api/v1/classes/" + classId + "/roster-imports")
+        MvcResult r = mvc.perform(multipart("/api/v1/workspaces/" + workspaceId + "/roster-imports")
             .file(new MockMultipartFile("file", "roster.csv", "text/csv", csv.toString().getBytes(StandardCharsets.UTF_8)))
             .with(csrf()).cookie(cookie)).andReturn();
         assertThat(r.getResponse().getStatus()).isEqualTo(201);
@@ -189,7 +189,7 @@ class CommitHashingLimitsIntegrationTest extends PostgresIntegrationTest {
     void aFailedOrRefusedCommitReleasesItsPermit() throws Exception {
         UUID importId = uploadRoster(cookie1, c1, "F", 2);
         // Conflicting state makes the write phase fail (409) after hashing has happened.
-        jdbc.update("INSERT INTO app_user (role, status, student_number, last_name, first_name) VALUES ('STUDENT', 'PENDING_ACTIVATION', 'F-0', 'Last0', 'First')");
+        jdbc.update("INSERT INTO app_user (role, status, student_number, last_name, first_name) VALUES ('PARTICIPANT', 'PENDING_ACTIVATION', 'F-0', 'Last0', 'First')");
         assertThat(status(commit(cookie1, importId))).isEqualTo(409);
         // The same user can commit again straight away: the permit was released.
         UUID fresh = uploadRoster(cookie1, c1, "G", 2);

@@ -11,7 +11,7 @@ import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import com.blissfuljuan.dieapi.project.model.MemberRow;
 import com.blissfuljuan.dieapi.project.model.ProjectRow;
 import com.blissfuljuan.dieapi.project.repository.ProjectRepository;
-import com.blissfuljuan.dieapi.project.view.Classmate;
+import com.blissfuljuan.dieapi.project.view.EligibleParticipant;
 import com.blissfuljuan.dieapi.project.view.HistoryEntry;
 import com.blissfuljuan.dieapi.project.view.MyInvitation;
 import com.blissfuljuan.dieapi.project.view.ProjectView;
@@ -43,10 +43,10 @@ public class ProjectQueryService {
     }
 
     @Transactional(readOnly = true)
-    public List<ProjectView> list(AppUserDetails user, UUID classId) {
-        policy.requireClassView(user, classId);
-        var cls = classes.peek(classId).orElseThrow(AccessPolicy::classNotFound);
-        List<ProjectRow> rows = repo.list(classId, policy.visibleProjects(user));
+    public List<ProjectView> list(AppUserDetails user, UUID workspaceId) {
+        policy.requireClassView(user, workspaceId);
+        var cls = classes.peek(workspaceId).orElseThrow(AccessPolicy::classNotFound);
+        List<ProjectRow> rows = repo.list(workspaceId, policy.visibleProjects(user));
         Map<UUID, List<MemberRow>> members = repo.currentMembersOf(rows.stream().map(ProjectRow::id).toList());
         List<ProjectView> out = new ArrayList<>();
         for (ProjectRow p : rows) {
@@ -70,17 +70,17 @@ public class ProjectQueryService {
 
     /** Classmates a student can invite. Only in classes where students form their own teams. */
     @Transactional(readOnly = true)
-    public List<Classmate> eligibleClassmates(AppUserDetails user, UUID classId) {
-        policy.requireClassView(user, classId);
-        var cls = classes.peek(classId).orElseThrow(AccessPolicy::classNotFound);
-        if (user.role() == UserRole.STUDENT && cls.teamFormation() != TeamFormation.STUDENT_FORMED) {
-            throw ApiException.forbidden(ErrorCode.TEAMS_ASSIGNED_BY_INSTRUCTOR, "Teams are assigned by your instructor in this class");
+    public List<EligibleParticipant> eligibleParticipants(AppUserDetails user, UUID workspaceId) {
+        policy.requireClassView(user, workspaceId);
+        var cls = classes.peek(workspaceId).orElseThrow(AccessPolicy::classNotFound);
+        if (user.role() == UserRole.PARTICIPANT && cls.teamFormation() != TeamFormation.PARTICIPANT_FORMED) {
+            throw ApiException.forbidden(ErrorCode.TEAMS_ASSIGNED_BY_COORDINATOR, "Teams are assigned by your coordinator in this workspace");
         }
-        return repo.eligibleClassmates(classId, user.getId());
+        return repo.eligibleParticipants(workspaceId, user.getId());
     }
 
     @Transactional(readOnly = true)
     public List<MyInvitation> myInvitations(AppUserDetails user) {
-        return user.role() == UserRole.STUDENT ? repo.pendingFor(user.getId()) : List.of();
+        return user.role() == UserRole.PARTICIPANT ? repo.pendingFor(user.getId()) : List.of();
     }
 }

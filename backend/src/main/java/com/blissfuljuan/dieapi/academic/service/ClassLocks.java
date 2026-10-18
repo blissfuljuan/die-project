@@ -20,19 +20,19 @@ public class ClassLocks {
         this.repo = repo;
     }
 
-    public LockedClass lock(UUID classId) {
-        return repo.lock(classId).orElseThrow(AccessPolicy::classNotFound);
+    public LockedClass lock(UUID workspaceId) {
+        return repo.lock(workspaceId).orElseThrow(AccessPolicy::classNotFound);
     }
 
-    public LockedClass lockWritable(UUID classId) {
-        LockedClass cur = lock(classId);
+    public LockedClass lockWritable(UUID workspaceId) {
+        LockedClass cur = lock(workspaceId);
         assertWritable(cur.status());
         return cur;
     }
 
     public static void assertWritable(ClassStatus status) {
         if (status == ClassStatus.ARCHIVED) {
-            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The class is archived and read-only");
+            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The workspace is archived and read-only");
         }
     }
 }

@@ -30,35 +30,35 @@ import java.util.UUID;
  * instructor, enrolled student) is always made by AccessPolicy inside the class services.
  */
 @RestController
-@RequestMapping("/api/v1/classes")
+@RequestMapping("/api/v1/workspaces")
 public class ClassController {
 
     public record CreateClassRequest(
             @Size(max = 100) String academicYear, @Size(max = 100) String semester,
             @Size(max = 100) String subjectCode, @Size(max = 100) String subjectName,
             @Size(max = 100) String section, String teamFormation, Integer teamMinSize, Integer teamMaxSize,
-            Boolean studentsMayChangeTeams, List<UUID> instructorIds) {}
+            Boolean participantsMayChangeTeams, List<UUID> coordinatorIds) {}
 
     public record UpdateClassRequest(
         @NotNull Long version,
         @Size(max = 100) String academicYear, @Size(max = 100) String semester,
         @Size(max = 100) String subjectCode, @Size(max = 100) String subjectName,
         @Size(max = 100) String section, String teamFormation, Integer teamMinSize, Integer teamMaxSize,
-        Boolean studentsMayChangeTeams) {}
+        Boolean participantsMayChangeTeams) {}
 
-    public record InstructorsRequest(@NotNull List<UUID> instructorIds) {}
+    public record InstructorsRequest(@NotNull List<UUID> coordinatorIds) {}
 
-    /** lastName is required for instructors enrolling by studentNumber (admins may omit it). */
-    public record EnrollRequest(UUID studentId, @Size(max = 64) String studentNumber, @Size(max = 100) String lastName,
+    /** lastName is required for coordinators enrolling by studentNumber (admins may omit it). */
+    public record EnrollRequest(UUID participantId, @Size(max = 64) String studentNumber, @Size(max = 100) String lastName,
                                 @Size(max = 100) String program, @Size(max = 100) String section) {}
 
     private final ClassService classes;
-    private final ClassInstructorService instructors;
+    private final ClassInstructorService coordinators;
     private final ClassEnrollmentService enrollments;
 
-    public ClassController(ClassService classes, ClassInstructorService instructors, ClassEnrollmentService enrollments) {
+    public ClassController(ClassService classes, ClassInstructorService coordinators, ClassEnrollmentService enrollments) {
         this.classes = classes;
-        this.instructors = instructors;
+        this.coordinators = coordinators;
         this.enrollments = enrollments;
     }
 
@@ -72,13 +72,13 @@ public class ClassController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN','INSTRUCTOR')")
+    @PreAuthorize("hasAnyRole('ADMIN','COORDINATOR')")
     public ResponseEntity<ClassView> create(@AuthenticationPrincipal AppUserDetails user,
                                             @Valid @RequestBody CreateClassRequest body) {
         ClassView created = classes.create(user, new CreateClass(body.academicYear(), body.semester(),
             body.subjectCode(), body.subjectName(), body.section(), body.teamFormation(), body.teamMinSize(),
-            body.teamMaxSize(), body.studentsMayChangeTeams(), body.instructorIds()));
-        return ResponseEntity.created(URI.create("/api/v1/classes/" + created.id())).body(created);
+            body.teamMaxSize(), body.participantsMayChangeTeams(), body.coordinatorIds()));
+        return ResponseEntity.created(URI.create("/api/v1/workspaces/" + created.id())).body(created);
     }
 
     @GetMapping("/{id}")
@@ -91,7 +91,7 @@ public class ClassController {
                             @Valid @RequestBody UpdateClassRequest body) {
         return classes.update(user, id, new UpdateClass(body.version(), body.academicYear(),
             body.semester(), body.subjectCode(), body.subjectName(), body.section(), body.teamFormation(),
-            body.teamMinSize(), body.teamMaxSize(), body.studentsMayChangeTeams()));
+            body.teamMinSize(), body.teamMaxSize(), body.participantsMayChangeTeams()));
     }
 
     @PostMapping("/{id}/archive")
@@ -106,12 +106,12 @@ public class ClassController {
     }
 
     /** Changing who teaches a class is an administrative act: peers must not be able to remove each other. */
-    @PutMapping("/{id}/instructors")
+    @PutMapping("/{id}/coordinators")
     @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void setInstructors(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
+    public void setCoordinators(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                                @Valid @RequestBody InstructorsRequest body) {
-        instructors.setInstructors(user, id, body.instructorIds());
+        coordinators.setCoordinators(user, id, body.coordinatorIds());
     }
 
     @GetMapping("/{id}/enrollments")
@@ -124,22 +124,22 @@ public class ClassController {
     @ResponseStatus(HttpStatus.CREATED)
     public void enroll(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                        @Valid @RequestBody EnrollRequest body) {
-        enrollments.enroll(user, id, new EnrollStudent(body.studentId(), body.studentNumber(), body.lastName(),
+        enrollments.enroll(user, id, new EnrollStudent(body.participantId(), body.studentNumber(), body.lastName(),
             body.program(), body.section()));
     }
 
     /** Staff of the class only; for students who have not activated their account yet. Returned once. */
-    @PostMapping("/{id}/enrollments/{studentId}/temporary-credential")
+    @PostMapping("/{id}/enrollments/{participantId}/temporary-credential")
     public ResponseEntity<TemporaryCredentialView> reissueTemporaryCredential(
-            @AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id, @PathVariable UUID studentId) {
+            @AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id, @PathVariable UUID participantId) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-            .body(enrollments.reissueTemporaryCredential(user, id, studentId));
+            .body(enrollments.reissueTemporaryCredential(user, id, participantId));
     }
 
-    @DeleteMapping("/{id}/enrollments/{studentId}")
+    @DeleteMapping("/{id}/enrollments/{participantId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void unenroll(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
-                         @PathVariable UUID studentId) {
-        enrollments.unenroll(user, id, studentId);
+                         @PathVariable UUID participantId) {
+        enrollments.unenroll(user, id, participantId);
     }
 }

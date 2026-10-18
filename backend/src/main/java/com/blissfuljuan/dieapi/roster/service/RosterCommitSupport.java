@@ -30,11 +30,11 @@ public class RosterCommitSupport {
     }
 
     /** Re-classifies the stored rows against the current database; 409 IMPORT_STALE if any outcome changed. */
-    public void assertUnchangedSincePreview(UUID classId, List<StoredRow> stored, AppUserDetails committer) {
+    public void assertUnchangedSincePreview(UUID workspaceId, List<StoredRow> stored, AppUserDetails committer) {
         List<NormalizedRow> rebuilt = stored.stream().map(r -> new NormalizedRow(r.rowNumber(), r.studentNumber(),
             r.lastName(), r.firstName(), r.middleName(), r.email(), r.program(), r.section(),
             r.action() == RowOutcome.INVALID ? r.message() : null)).toList();
-        List<StoredRow> fresh = analyzer.classify(classId, rebuilt, committer);
+        List<StoredRow> fresh = analyzer.classify(workspaceId, rebuilt, committer);
         for (int i = 0; i < stored.size(); i++) {
             StoredRow was = stored.get(i), now = fresh.get(i);
             if (was.action() != now.action() || was.conflictKind() != now.conflictKind()

@@ -26,17 +26,17 @@ public class AccessRepository {
 
     // ---- facts ----
 
-    public boolean classExists(UUID classId) {
-        return exists("SELECT 1 FROM academic_class WHERE id = :c", classId, null);
+    public boolean classExists(UUID workspaceId) {
+        return exists("SELECT 1 FROM academic_class WHERE id = :c", workspaceId, null);
     }
 
-    public boolean isClassInstructor(UUID classId, UUID userId) {
-        return exists("SELECT 1 FROM class_instructor WHERE class_id = :c AND user_id = :u", classId, userId);
+    public boolean isClassInstructor(UUID workspaceId, UUID userId) {
+        return exists("SELECT 1 FROM class_instructor WHERE class_id = :c AND user_id = :u", workspaceId, userId);
     }
 
-    public boolean isEnrolled(UUID classId, UUID userId) {
+    public boolean isEnrolled(UUID workspaceId, UUID userId) {
         return exists("SELECT 1 FROM enrollment WHERE class_id = :c AND student_id = :u AND status = 'ENROLLED'",
-            classId, userId);
+            workspaceId, userId);
     }
 
     public boolean projectExists(UUID projectId) {

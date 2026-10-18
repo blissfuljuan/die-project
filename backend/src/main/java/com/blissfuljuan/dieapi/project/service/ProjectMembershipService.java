@@ -60,27 +60,27 @@ public class ProjectMembershipService {
         ProjectValidation.requireVersion(req.version());
         return mutation.run(projectId, Requires.ACTIVE_PROJECT, () -> policy.requireProjectStaff(user, projectId),
             req.version(), (locked, role) -> {
-                UUID classId = locked.project().classId();
+                UUID workspaceId = locked.project().workspaceId();
                 boolean individual = locked.project().kind() == ProjectKind.INDIVIDUAL;
                 boolean exception = Boolean.TRUE.equals(req.allowSizeException());
 
                 List<UUID> desired = distinct(req.memberIds());
                 if (individual) {
                     if (desired.size() != 1) {
-                        throw ApiException.badRequest(ErrorCode.INDIVIDUAL_PROJECT_ONE_STUDENT, "An individual project has exactly one student");
+                        throw ApiException.badRequest(ErrorCode.INDIVIDUAL_PROJECT_ONE_PARTICIPANT, "An individual project has exactly one participant");
                     }
                 } else {
                     if (desired.isEmpty()) {
-                        throw ApiException.badRequest(ErrorCode.MEMBERS_REQUIRED, "memberIds must list at least one student");
+                        throw ApiException.badRequest(ErrorCode.MEMBERS_REQUIRED, "memberIds must list at least one participant");
                     }
                     checkTeamSize(locked.cls(), desired.size(), exception);
                 }
-                for (UUID id : desired) validation.assertEnrolledAndFree(classId, id, projectId);
+                for (UUID id : desired) validation.assertEnrolledAndFree(workspaceId, id, projectId);
 
                 Map<UUID, TeamRole> current = new LinkedHashMap<>();
                 repo.currentMembers(projectId).forEach(m -> current.put(m.userId(), m.role()));
                 UUID rep = individual ? null : reconciler.chooseRepresentative(req.representativeId(), current, desired);
-                apply(reconciler.plan(current, desired, rep), projectId, classId, user.getId());
+                apply(reconciler.plan(current, desired, rep), projectId, workspaceId, user.getId());
                 repo.touch(projectId);
 
                 Map<String, Object> details = new LinkedHashMap<>();
@@ -92,35 +92,35 @@ public class ProjectMembershipService {
             });
     }
 
-    private void apply(MembershipPlan plan, UUID projectId, UUID classId, UUID actor) {
+    private void apply(MembershipPlan plan, UUID projectId, UUID workspaceId, UUID actor) {
         for (UUID id : plan.removals()) repo.endMember(projectId, id, actor);
         for (UUID id : plan.demotions()) team.changeRole(projectId, id, TeamRole.MEMBER, actor);
         for (UUID id : plan.promotions()) team.changeRole(projectId, id, TeamRole.REPRESENTATIVE, actor);
         for (UUID id : plan.additions()) {
             team.add(projectId, id, plan.roleOfAddition(id), actor);
-            repo.cancelPendingForUserInClass(classId, id);
+            repo.cancelPendingForUserInClass(workspaceId, id);
         }
     }
 
     /** Staff or the current representative: hand the representative role to another current member. */
     @Transactional
-    public ProjectView setRepresentative(AppUserDetails user, UUID projectId, UUID studentId) {
+    public ProjectView setRepresentative(AppUserDetails user, UUID projectId, UUID participantId) {
         return mutation.run(projectId, Requires.ACTIVE_PROJECT, () -> policy.requireProjectEdit(user, projectId),
             null, (locked, role) -> {
                 if (locked.project().kind() == ProjectKind.INDIVIDUAL) {
                     throw ApiException.conflict(ErrorCode.INDIVIDUAL_PROJECT_NO_REPRESENTATIVE, "An individual project has no representative");
                 }
                 List<MemberRow> members = repo.currentMembers(projectId);
-                if (members.stream().noneMatch(m -> m.userId().equals(studentId))) {
+                if (members.stream().noneMatch(m -> m.userId().equals(participantId))) {
                     throw ApiException.badRequest(ErrorCode.INVALID_REPRESENTATIVE, "The new representative must be a current member of the team");
                 }
                 MemberRow old = members.stream().filter(m -> m.role() == TeamRole.REPRESENTATIVE).findFirst().orElse(null);
-                if (old == null || !old.userId().equals(studentId)) {
+                if (old == null || !old.userId().equals(participantId)) {
                     if (old != null) team.changeRole(projectId, old.userId(), TeamRole.MEMBER, user.getId());
-                    team.changeRole(projectId, studentId, TeamRole.REPRESENTATIVE, user.getId());
+                    team.changeRole(projectId, participantId, TeamRole.REPRESENTATIVE, user.getId());
                     repo.touch(projectId);
                     events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_REPRESENTATIVE_CHANGED, AuditResource.PROJECT, projectId.toString(),
-                        Map.of("from", old == null ? "" : old.userId().toString(), "to", studentId.toString())));
+                        Map.of("from", old == null ? "" : old.userId().toString(), "to", participantId.toString())));
                 }
                 return views.viewOf(projectId, role);
             });
@@ -131,16 +131,16 @@ public class ProjectMembershipService {
     public void leave(AppUserDetails user, UUID projectId) {
         mutation.run(projectId, Requires.ACTIVE_PROJECT, () -> {
             ProjectRole role = policy.requireProjectView(user, projectId); // also re-checked under the locks: a concurrent removal must not produce a bogus "left" event
-            if (role == ProjectRole.STAFF) {
+            if (role.isStaff()) {
                 throw ApiException.forbidden(ErrorCode.STAFF_MANAGE_MEMBERSHIP, "Staff manage membership with PUT /members");
             }
             return role;
         }, null, (locked, role) -> {
             if (locked.project().kind() != ProjectKind.TEAM) {
-                throw ApiException.conflict(ErrorCode.INDIVIDUAL_PROJECT_CANNOT_BE_LEFT, "Individual projects cannot be left; ask your instructor");
+                throw ApiException.conflict(ErrorCode.INDIVIDUAL_PROJECT_CANNOT_BE_LEFT, "Individual projects cannot be left; ask your coordinator");
             }
-            if (!locked.cls().studentsMayChangeTeams()) {
-                throw ApiException.forbidden(ErrorCode.TEAM_CHANGES_NOT_ALLOWED, "Your instructor does not allow students to change teams");
+            if (!locked.cls().participantsMayChangeTeams()) {
+                throw ApiException.forbidden(ErrorCode.TEAM_CHANGES_NOT_ALLOWED, "Your coordinator does not allow participants to change teams");
             }
             team.remove(projectId, user.getId(), user.getId(), "left team");
             events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_MEMBER_LEFT, AuditResource.PROJECT, projectId.toString(), Map.of()));

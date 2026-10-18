@@ -42,7 +42,7 @@ class GlobalExceptionHandlerIntegrationTest extends PostgresIntegrationTest {
     @BeforeEach
     void seed() throws Exception {
         user("admin@x.edu", "ADMIN", null);
-        user("student@x.edu", "STUDENT", "S-1");
+        user("student@x.edu", "PARTICIPANT", "S-1");
         admin = login("admin@x.edu");
         student = login("student@x.edu");
     }
@@ -148,8 +148,8 @@ class GlobalExceptionHandlerIntegrationTest extends PostgresIntegrationTest {
         String broken = assertProblem(json(null, HttpMethod.POST, "/api/v1/auth/login", "{not json"), 400, "MALFORMED_REQUEST");
         assertThat((String) JsonPath.read(broken, "$.detail")).contains("not valid JSON");
 
-        String wrongType = assertProblem(json(admin, HttpMethod.POST, "/api/v1/classes", "{\"instructorIds\":\"not-a-list\"}"), 400, "MALFORMED_REQUEST");
-        assertThat((String) JsonPath.read(wrongType, "$.detail")).contains("instructorIds");
+        String wrongType = assertProblem(json(admin, HttpMethod.POST, "/api/v1/workspaces", "{\"coordinatorIds\":\"not-a-list\"}"), 400, "MALFORMED_REQUEST");
+        assertThat((String) JsonPath.read(wrongType, "$.detail")).contains("coordinatorIds");
     }
 
     @Test
@@ -165,7 +165,7 @@ class GlobalExceptionHandlerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void aBadIdInThePathNamesTheParameter_andAnUnknownEndpointIs404() throws Exception {
-        String type = assertProblem(json(admin, HttpMethod.GET, "/api/v1/classes/not-a-uuid", null), 400, "INVALID_PARAMETER");
+        String type = assertProblem(json(admin, HttpMethod.GET, "/api/v1/workspaces/not-a-uuid", null), 400, "INVALID_PARAMETER");
         assertThat((String) JsonPath.read(type, "$.detail")).isEqualTo("Parameter 'id' must be a valid UUID.");
 
         String missing = assertProblem(json(admin, HttpMethod.GET, "/api/v1/nothing-here", null), 404, "ENDPOINT_NOT_FOUND");
@@ -174,7 +174,7 @@ class GlobalExceptionHandlerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void aMissingUploadFileIsExplained() throws Exception {
-        MvcResult r = mvc.perform(multipart("/api/v1/classes/" + UUID.randomUUID() + "/roster-imports").with(csrf()).cookie(admin)).andReturn();
+        MvcResult r = mvc.perform(multipart("/api/v1/workspaces/" + UUID.randomUUID() + "/roster-imports").with(csrf()).cookie(admin)).andReturn();
         String body = assertProblem(r, 400, "MISSING_PART");
         assertThat((String) JsonPath.read(body, "$.detail")).contains("'file'");
     }
@@ -183,9 +183,9 @@ class GlobalExceptionHandlerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void notFoundAndConflictCarryStableCodes() throws Exception {
-        assertProblem(json(admin, HttpMethod.GET, "/api/v1/classes/" + UUID.randomUUID(), null), 404, "CLASS_NOT_FOUND");
+        assertProblem(json(admin, HttpMethod.GET, "/api/v1/workspaces/" + UUID.randomUUID(), null), 404, "CLASS_NOT_FOUND");
 
-        String user = "{\"role\":\"INSTRUCTOR\",\"lastName\":\"A\",\"firstName\":\"B\",\"email\":\"dup@x.edu\"}";
+        String user = "{\"role\":\"COORDINATOR\",\"lastName\":\"A\",\"firstName\":\"B\",\"email\":\"dup@x.edu\"}";
         assertThat(json(admin, HttpMethod.POST, "/api/v1/users", user).getResponse().getStatus()).isEqualTo(201);
         String dup = assertProblem(json(admin, HttpMethod.POST, "/api/v1/users", user), 409, "ALREADY_EXISTS");
         assertThat((String) JsonPath.read(dup, "$.detail")).contains("already exists");

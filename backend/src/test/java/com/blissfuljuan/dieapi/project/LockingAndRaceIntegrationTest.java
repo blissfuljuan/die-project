@@ -38,22 +38,22 @@ class LockingAndRaceIntegrationTest extends PostgresIntegrationTest {
     @Autowired PlatformTransactionManager txManager;
 
     final ExecutorService pool = Executors.newFixedThreadPool(4);
-    UUID rep, member, invitee, instructor, classId, projectId, invitationId;
+    UUID rep, member, invitee, instructor, workspaceId, projectId, invitationId;
     Cookie repCookie, inviteeCookie;
 
     @BeforeEach
     void seed() throws Exception {
-        instructor = user("i@x.edu", "INSTRUCTOR", null);
-        rep = user("rep@x.edu", "STUDENT", "S-1");
-        member = user("member@x.edu", "STUDENT", "S-2");
-        invitee = user("invitee@x.edu", "STUDENT", "S-3");
-        classId = jdbc.queryForObject("""
+        instructor = user("i@x.edu", "COORDINATOR", null);
+        rep = user("rep@x.edu", "PARTICIPANT", "S-1");
+        member = user("member@x.edu", "PARTICIPANT", "S-2");
+        invitee = user("invitee@x.edu", "PARTICIPANT", "S-3");
+        workspaceId = jdbc.queryForObject("""
             INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section, team_formation, team_min_size, team_max_size)
-            VALUES ('2025-2026', '1st', 'CS1', 'S', 'A', 'STUDENT_FORMED', 2, 4) RETURNING id
+            VALUES ('2025-2026', '1st', 'CS1', 'S', 'A', 'PARTICIPANT_FORMED', 2, 4) RETURNING id
             """, UUID.class);
-        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", classId, instructor);
-        for (UUID s : new UUID[] {rep, member, invitee}) jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", classId, s);
-        projectId = jdbc.queryForObject("INSERT INTO project (class_id, title, kind, team_name) VALUES (?, 'Team', 'TEAM', 'Team') RETURNING id", UUID.class, classId);
+        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", workspaceId, instructor);
+        for (UUID s : new UUID[] {rep, member, invitee}) jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", workspaceId, s);
+        projectId = jdbc.queryForObject("INSERT INTO project (class_id, title, kind, team_name) VALUES (?, 'Team', 'TEAM', 'Team') RETURNING id", UUID.class, workspaceId);
         jdbc.update("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'REPRESENTATIVE')", projectId, rep);
         jdbc.update("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'MEMBER')", projectId, member);
         invitationId = jdbc.queryForObject("INSERT INTO team_invitation (project_id, invited_user_id, invited_by, expires_at) VALUES (?, ?, ?, now() + interval '1 day') RETURNING id",
@@ -96,7 +96,7 @@ class LockingAndRaceIntegrationTest extends PostgresIntegrationTest {
     /** Holds the class row lock (like any staff mutation) after running {@code concurrentChange}, until released. */
     private Future<?> holdClassLock(Runnable concurrentChange, CountDownLatch locked, CountDownLatch release) {
         return pool.submit(() -> tx().executeWithoutResult(status -> {
-            jdbc.queryForObject("SELECT id FROM academic_class WHERE id = ? FOR UPDATE", UUID.class, classId);
+            jdbc.queryForObject("SELECT id FROM academic_class WHERE id = ? FOR UPDATE", UUID.class, workspaceId);
             concurrentChange.run();
             locked.countDown();
             try {
@@ -134,7 +134,7 @@ class LockingAndRaceIntegrationTest extends PostgresIntegrationTest {
         CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
         Future<?> holder = holdClassLock(() -> {
             // what ClassEnrollmentService.unenroll does while holding the class lock
-            jdbc.update("UPDATE enrollment SET status = 'REMOVED', removed_at = now() WHERE class_id = ? AND student_id = ?", classId, invitee);
+            jdbc.update("UPDATE enrollment SET status = 'REMOVED', removed_at = now() WHERE class_id = ? AND student_id = ?", workspaceId, invitee);
             jdbc.update("UPDATE team_invitation SET status = 'CANCELLED' WHERE id = ?", invitationId);
         }, locked, release);
         assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
@@ -153,14 +153,14 @@ class LockingAndRaceIntegrationTest extends PostgresIntegrationTest {
     @Test
     void aRepresentativeRemovedWhileInvitingCannotSendTheInvitation() throws Exception {
         CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
-        UUID other = user("other@x.edu", "STUDENT", "S-4");
-        jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", classId, other);
+        UUID other = user("other@x.edu", "PARTICIPANT", "S-4");
+        jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", workspaceId, other);
         Future<?> holder = holdClassLock(() -> jdbc.update(
             "UPDATE project_member SET left_at = now() WHERE project_id = ? AND user_id = ? AND left_at IS NULL", projectId, rep), locked, release);
         assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
 
         // The representative still looks like a representative to everything committed so far.
-        Future<MvcResult> invite = pool.submit(() -> call(repCookie, HttpMethod.POST, "/api/v1/projects/" + projectId + "/invitations", "{\"studentId\":\"" + other + "\"}"));
+        Future<MvcResult> invite = pool.submit(() -> call(repCookie, HttpMethod.POST, "/api/v1/projects/" + projectId + "/invitations", "{\"participantId\":\"" + other + "\"}"));
         Thread.sleep(800);
         assertThat(invite.isDone()).isFalse();
         release.countDown();
@@ -192,7 +192,7 @@ class LockingAndRaceIntegrationTest extends PostgresIntegrationTest {
     @Test
     void aMemberRemovedWhileLeavingDoesNotProduceALeftEvent() throws Exception {
         CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
-        jdbc.update("UPDATE academic_class SET students_may_change_teams = TRUE WHERE id = ?", classId);
+        jdbc.update("UPDATE academic_class SET students_may_change_teams = TRUE WHERE id = ?", workspaceId);
         Cookie memberCookie = login("member@x.edu");
         Future<?> holder = holdClassLock(() -> jdbc.update(
             "UPDATE project_member SET left_at = now() WHERE project_id = ? AND user_id = ? AND left_at IS NULL", projectId, member), locked, release);

@@ -31,22 +31,22 @@ public class StaffTeamCreation implements ProjectCreationStrategy {
 
     @Override
     public boolean supports(UserRole actor, ProjectKind kind) {
-        return actor != UserRole.STUDENT && kind == ProjectKind.TEAM;
+        return actor != UserRole.PARTICIPANT && kind == ProjectKind.TEAM;
     }
 
     @Override
     public UUID create(ProjectCreation c) {
         List<UUID> members = ProjectValidation.distinct(c.request().memberIds());
         if (members.isEmpty()) {
-            throw ApiException.badRequest(ErrorCode.MEMBERS_REQUIRED, "memberIds must list at least one student");
+            throw ApiException.badRequest(ErrorCode.MEMBERS_REQUIRED, "memberIds must list at least one participant");
         }
         ProjectValidation.checkTeamSize(c.cls(), members.size(), Boolean.TRUE.equals(c.request().allowSizeException()));
         UUID rep = c.request().representativeId() == null ? members.get(0) : c.request().representativeId();
         if (!members.contains(rep)) {
             throw ApiException.badRequest(ErrorCode.INVALID_REPRESENTATIVE, "representativeId must be one of memberIds");
         }
-        for (UUID m : members) validation.assertEnrolledAndFree(c.classId(), m, null);
-        UUID projectId = repo.insert(c.classId(), c.kind(), c.title(), c.description(), c.teamName(), c.actor().getId());
+        for (UUID m : members) validation.assertEnrolledAndFree(c.workspaceId(), m, null);
+        UUID projectId = repo.insert(c.workspaceId(), c.kind(), c.title(), c.description(), c.teamName(), c.actor().getId());
         for (UUID m : members) {
             team.add(projectId, m, m.equals(rep) ? TeamRole.REPRESENTATIVE : TeamRole.MEMBER, c.actor().getId());
         }

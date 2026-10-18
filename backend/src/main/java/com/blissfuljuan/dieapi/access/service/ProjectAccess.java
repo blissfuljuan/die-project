@@ -47,11 +47,20 @@ class ProjectAccess {
         return role;
     }
 
-    /** Admins and instructors of the project's class only. */
+    /** Admins and coordinators of the project's class only. */
     ProjectRole requireStaff(AppUserDetails user, UUID projectId) {
         ProjectRole role = requireView(user, projectId);
         if (!role.isStaff()) {
             throw AccessPolicy.accessDenied();
+        }
+        return role;
+    }
+
+    /** Content access: view plus a role that may read content. Administrators get the 404 outsiders get. */
+    ProjectRole requireContent(AppUserDetails user, UUID projectId) {
+        ProjectRole role = requireView(user, projectId);
+        if (!role.canAccessContent()) {
+            throw notFound();
         }
         return role;
     }
