@@ -11,18 +11,18 @@ import java.util.UUID;
 
 /** Instructors manage the classes they are assigned to and the projects in them. */
 @Component
-class InstructorAccess implements RoleAccess {
+class CoordinatorAccess implements RoleAccess {
 
     private final AccessRepository repo;
 
-    InstructorAccess(AccessRepository repo) {
+    CoordinatorAccess(AccessRepository repo) {
         this.repo = repo;
     }
 
-    @Override public UserRole role() { return UserRole.INSTRUCTOR; }
+    @Override public UserRole role() { return UserRole.COORDINATOR; }
 
-    @Override public ClassRole classRole(UUID userId, UUID classId) {
-        return repo.isClassInstructor(classId, userId) ? ClassRole.INSTRUCTOR : ClassRole.NONE;
+    @Override public ClassRole classRole(UUID userId, UUID workspaceId) {
+        return repo.isClassInstructor(workspaceId, userId) ? ClassRole.COORDINATOR : ClassRole.NONE;
     }
 
     @Override public ProjectRole projectRole(UUID userId, UUID projectId) {

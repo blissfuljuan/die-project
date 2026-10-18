@@ -25,12 +25,12 @@ public class ProjectClassIntegration implements StudentRemovalHandler, ClassTeam
     }
 
     @Override
-    public void onStudentRemovedFromClass(UUID classId, UUID studentId, UUID actor) {
-        teamMembership.onStudentRemovedFromClass(classId, studentId, actor);
+    public void onStudentRemovedFromClass(UUID workspaceId, UUID participantId, UUID actor) {
+        teamMembership.onStudentRemovedFromClass(workspaceId, participantId, actor);
     }
 
     @Override
-    public int largestActiveTeamSize(UUID classId) {
-        return projects.maxActiveTeamSize(classId);
+    public int largestActiveTeamSize(UUID workspaceId) {
+        return projects.maxActiveTeamSize(workspaceId);
     }
 }

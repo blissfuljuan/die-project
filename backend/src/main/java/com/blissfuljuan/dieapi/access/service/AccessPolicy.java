@@ -36,21 +36,21 @@ public class AccessPolicy {
         this.projects = projects;
     }
 
-    public ClassRole classRole(AppUserDetails user, UUID classId) {
-        return classes.classRole(user, classId);
+    public ClassRole classRole(AppUserDetails user, UUID workspaceId) {
+        return classes.classRole(user, workspaceId);
     }
 
     /** Caller may read the class (staff of the class, admins, enrolled students). Otherwise 404. */
-    public ClassRole requireClassView(AppUserDetails user, UUID classId) {
-        return classes.requireView(user, classId);
+    public ClassRole requireClassView(AppUserDetails user, UUID workspaceId) {
+        return classes.requireView(user, workspaceId);
     }
 
-    /** Caller may change the class, its instructors and its roster: admins and instructors assigned to it. */
-    public ClassRole requireClassManage(AppUserDetails user, UUID classId) {
-        return classes.requireManage(user, classId);
+    /** Caller may change the class, its coordinators and its roster: admins and coordinators assigned to it. */
+    public ClassRole requireClassManage(AppUserDetails user, UUID workspaceId) {
+        return classes.requireManage(user, workspaceId);
     }
 
-    /** Restricts class listings: admins see all, instructors their classes, students their enrolled classes. */
+    /** Restricts class listings: admins see all, coordinators their classes, students their enrolled classes. */
     public SqlScope visibleClasses(AppUserDetails user) {
         return classes.visibleClasses(user);
     }
@@ -69,12 +69,29 @@ public class AccessPolicy {
         return projects.requireEdit(user, projectId);
     }
 
-    /** Admins and instructors of the project's class only. */
+    /** Admins and coordinators of the project's class only. */
     public ProjectRole requireProjectStaff(AppUserDetails user, UUID projectId) {
         return projects.requireStaff(user, projectId);
     }
 
-    /** Restricts project listings (alias {@code p}): admins all, instructors their classes', students their own teams. */
+    /**
+     * Caller may read the CONTENT of the workspace (requirements, workflows, templates, evaluations). Administrators
+     * are refused with the same 404 an outsider gets: administrator authority never grants content access.
+     */
+    public ClassRole requireClassContent(AppUserDetails user, UUID workspaceId) {
+        return classes.requireContent(user, workspaceId);
+    }
+
+    /**
+     * Caller may read the CONTENT of the project (documents, submissions, evaluations, reviews, approvals,
+     * publications). Administrators and non-members get the same 404 as for a missing project. Further
+     * restrictions (published-only for participants, reviewer assignment) are added by the owning module.
+     */
+    public ProjectRole requireProjectContent(AppUserDetails user, UUID projectId) {
+        return projects.requireContent(user, projectId);
+    }
+
+    /** Restricts project listings (alias {@code p}): admins all, coordinators their classes', students their own teams. */
     public SqlScope visibleProjects(AppUserDetails user) {
         return projects.visibleProjects(user);
     }

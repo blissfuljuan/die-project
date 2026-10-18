@@ -48,7 +48,7 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
     private UUID pendingStudent(String studentNumber) {
         UUID id = jdbc.queryForObject("""
             INSERT INTO app_user (role, status, student_number, last_name, first_name)
-            VALUES ('STUDENT', 'PENDING_ACTIVATION', ?, 'Cruz', 'Maria') RETURNING id
+            VALUES ('PARTICIPANT', 'PENDING_ACTIVATION', ?, 'Cruz', 'Maria') RETURNING id
             """, UUID.class, studentNumber);
         jdbc.update("INSERT INTO temp_credential (user_id, secret_hash, expires_at) VALUES (?, ?, now() + interval '14 days')",
             id, encoder.encode(TEMP));
@@ -141,7 +141,7 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
 
         MvcResult signedIn = login("maria.cruz@example.edu", NEW_PASSWORD);
         assertThat(status(signedIn)).isEqualTo(200);
-        assertThat(body(signedIn)).contains("\"role\":\"STUDENT\"");
+        assertThat(body(signedIn)).contains("\"role\":\"PARTICIPANT\"");
 
         // Temporary credential and verification link are single-use.
         assertThat(status(check("2024-0100", TEMP))).isEqualTo(401);
@@ -158,7 +158,7 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
         activeUser("admin@example.edu", "ADMIN", ADMIN_PASSWORD);
         Cookie admin = sessionOf(login("admin@example.edu", ADMIN_PASSWORD));
         MvcResult created = postJson("/api/v1/users", admin,
-            "{\"role\":\"INSTRUCTOR\",\"lastName\":\"Reyes\",\"firstName\":\"Ana\",\"email\":\"ana@example.edu\"}");
+            "{\"role\":\"COORDINATOR\",\"lastName\":\"Reyes\",\"firstName\":\"Ana\",\"email\":\"ana@example.edu\"}");
         assertThat(status(created)).isEqualTo(201);
         String temp = JsonPath.read(body(created), "$.temporaryCredential");
 
@@ -172,7 +172,7 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
     @Test
     void resetUserKeepingVerifiedEmailIsActiveImmediatelyWithoutNewMail() throws Exception {
         activeUser("admin@example.edu", "ADMIN", ADMIN_PASSWORD);
-        UUID teacher = activeUser("teacher@example.edu", "INSTRUCTOR", "old passphrase 123");
+        UUID teacher = activeUser("teacher@example.edu", "COORDINATOR", "old passphrase 123");
         Cookie admin = sessionOf(login("admin@example.edu", ADMIN_PASSWORD));
         MvcResult reset = postJson("/api/v1/users/" + teacher + "/reset-credentials", admin, "{}");
         String temp = JsonPath.read(body(reset), "$.temporaryCredential");
@@ -203,7 +203,7 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
         // Account reset by an admin: email stays verified, password cleared, new temporary credential.
         UUID id = jdbc.queryForObject("""
             INSERT INTO app_user (role, status, last_name, first_name, email, email_verified_at)
-            VALUES ('INSTRUCTOR', 'PENDING_ACTIVATION', 'Reyes', 'Ana', 'ana@example.edu', now()) RETURNING id
+            VALUES ('COORDINATOR', 'PENDING_ACTIVATION', 'Reyes', 'Ana', 'ana@example.edu', now()) RETURNING id
             """, UUID.class);
         jdbc.update("INSERT INTO temp_credential (user_id, secret_hash, expires_at) VALUES (?, ?, now() + interval '14 days')",
             id, encoder.encode(TEMP));
@@ -261,7 +261,7 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void emailAlreadyUsedByAnotherAccountIsRejectedAndLeavesStateUntouched() throws Exception {
-        activeUser("taken@example.edu", "INSTRUCTOR", "whatever passphrase");
+        activeUser("taken@example.edu", "COORDINATOR", "whatever passphrase");
         UUID id = pendingStudent("2024-0106");
         assertThat(status(begin("2024-0106", TEMP, "taken@example.edu", NEW_PASSWORD))).isEqualTo(409);
         assertThat(jdbc.queryForObject("SELECT email FROM app_user WHERE id = ?", String.class, id)).isNull();

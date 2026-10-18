@@ -11,18 +11,18 @@ import java.util.UUID;
 
 /** Students see the classes they are enrolled in and only the projects they are currently a member of. */
 @Component
-class StudentAccess implements RoleAccess {
+class ParticipantAccess implements RoleAccess {
 
     private final AccessRepository repo;
 
-    StudentAccess(AccessRepository repo) {
+    ParticipantAccess(AccessRepository repo) {
         this.repo = repo;
     }
 
-    @Override public UserRole role() { return UserRole.STUDENT; }
+    @Override public UserRole role() { return UserRole.PARTICIPANT; }
 
-    @Override public ClassRole classRole(UUID userId, UUID classId) {
-        return repo.isEnrolled(classId, userId) ? ClassRole.STUDENT : ClassRole.NONE;
+    @Override public ClassRole classRole(UUID userId, UUID workspaceId) {
+        return repo.isEnrolled(workspaceId, userId) ? ClassRole.PARTICIPANT : ClassRole.NONE;
     }
 
     @Override public ProjectRole projectRole(UUID userId, UUID projectId) {

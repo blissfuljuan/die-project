@@ -9,5 +9,5 @@ import java.util.UUID;
 public interface ClassTeamStats {
 
     /** Number of members of the largest active team in the class (0 if there is none). */
-    int largestActiveTeamSize(UUID classId);
+    int largestActiveTeamSize(UUID workspaceId);
 }

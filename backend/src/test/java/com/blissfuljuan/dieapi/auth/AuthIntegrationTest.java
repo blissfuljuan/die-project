@@ -30,8 +30,8 @@ class AuthIntegrationTest extends PostgresIntegrationTest {
     void seed() {
         jdbc.update("DELETE FROM login_attempt");
         jdbc.update("DELETE FROM app_user");
-        insertUser("instructor@example.edu", "INSTRUCTOR", "ACTIVE");
-        insertUser("gone@example.edu", "INSTRUCTOR", "DEACTIVATED");
+        insertUser("instructor@example.edu", "COORDINATOR", "ACTIVE");
+        insertUser("gone@example.edu", "COORDINATOR", "DEACTIVATED");
     }
 
     private void insertUser(String email, String role, String status) {
@@ -64,7 +64,7 @@ class AuthIntegrationTest extends PostgresIntegrationTest {
     void loginSucceedsAndSessionAuthenticatesMe() throws Exception {
         MvcResult result = login("Instructor@Example.edu", PASSWORD);
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
-        assertThat(result.getResponse().getContentAsString()).contains("\"role\":\"INSTRUCTOR\"");
+        assertThat(result.getResponse().getContentAsString()).contains("\"role\":\"COORDINATOR\"");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("password");
 
         mvc.perform(get("/api/v1/auth/me").cookie(sessionCookie(result)))

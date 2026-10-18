@@ -49,7 +49,7 @@ class SecurityHardeningIntegrationTest extends PostgresIntegrationTest {
         jdbc.update("DELETE FROM login_attempt");
         jdbc.update("DELETE FROM password_reset_token");
         jdbc.update("DELETE FROM app_user");
-        userId = insertUser("teacher@example.edu", "INSTRUCTOR", "ACTIVE");
+        userId = insertUser("teacher@example.edu", "COORDINATOR", "ACTIVE");
     }
 
     private UUID insertUser(String email, String role, String status) {
@@ -127,7 +127,7 @@ class SecurityHardeningIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void deactivatedAccountIsOnlyReportedAfterThePasswordIsVerified() {
-        insertUser("gone@example.edu", "INSTRUCTOR", "DEACTIVATED");
+        insertUser("gone@example.edu", "COORDINATOR", "DEACTIVATED");
         assertThatThrownBy(() -> authenticationManager.authenticate(
             UsernamePasswordAuthenticationToken.unauthenticated("gone@example.edu", "wrong password here")))
             .isInstanceOf(BadCredentialsException.class);

@@ -13,6 +13,6 @@ public class OpenApiConfig {
         return new OpenAPI().info(new Info()
             .title("Document-Implementation Evaluator API")
             .version("v1")
-            .description("AI output is advisory; instructors hold final authority."));
+            .description("AI output is advisory; coordinators hold final authority."));
     }
 }

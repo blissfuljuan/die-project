@@ -43,7 +43,7 @@ public class RosterAnalyzer {
         this.repo = repo;
     }
 
-    public List<StoredRow> classify(UUID classId, List<NormalizedRow> rows, AppUserDetails caller) {
+    public List<StoredRow> classify(UUID workspaceId, List<NormalizedRow> rows, AppUserDetails caller) {
         boolean admin = caller.role() == UserRole.ADMIN;
         Set<String> numbers = new HashSet<>();
         for (NormalizedRow r : rows) {
@@ -52,7 +52,7 @@ public class RosterAnalyzer {
         Map<String, ExistingUser> existingByNumber = repo.usersByStudentNumber(numbers);
         Set<UUID> known = admin ? Set.of()
             : repo.studentsKnownToInstructor(caller.getId(), existingByNumber.values().stream().map(ExistingUser::id).toList());
-        Map<UUID, EnrollmentStatus> enrollments = repo.enrollmentStatuses(classId);
+        Map<UUID, EnrollmentStatus> enrollments = repo.enrollmentStatuses(workspaceId);
 
         Map<String, NormalizedRow> firstByNumber = new HashMap<>();
         List<StoredRow> out = new ArrayList<>(rows.size());
@@ -100,10 +100,10 @@ public class RosterAnalyzer {
             return stored(r, CONFLICT, ConflictKind.ID_UNAVAILABLE, UNAVAILABLE_MESSAGE, null);
         }
         if (enrollments.get(existing.id()) == EnrollmentStatus.ENROLLED) {
-            return stored(r, SKIP_DUPLICATE, null, "Already enrolled in this class", existing.id());
+            return stored(r, SKIP_DUPLICATE, null, "Already enrolled in this workspace", existing.id());
         }
         String note = enrollments.get(existing.id()) == EnrollmentStatus.REMOVED
-            ? "Existing account; previously removed from this class, will be re-enrolled"
+            ? "Existing account; previously removed from this workspace, will be re-enrolled"
             : "Existing account; will be enrolled";
         return stored(r, MATCH, null, note, existing.id());
     }

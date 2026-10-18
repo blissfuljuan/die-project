@@ -29,7 +29,7 @@ public class ProjectController {
 
     public record CreateProjectRequest(@Size(max = 20) String kind, @Size(max = 200) String title,
                                        @Size(max = 2000) String description, @Size(max = 100) String teamName,
-                                       UUID studentId, List<UUID> memberIds, UUID representativeId,
+                                       UUID participantId, List<UUID> memberIds, UUID representativeId,
                                        Boolean allowSizeException) {}
 
     public record UpdateProjectRequest(@NotNull Long version, @Size(max = 200) String title,
@@ -38,9 +38,9 @@ public class ProjectController {
     public record SetMembersRequest(@NotNull Long version, @NotNull List<UUID> memberIds, UUID representativeId,
                                     Boolean allowSizeException) {}
 
-    public record RepresentativeRequest(@NotNull UUID studentId) {}
+    public record RepresentativeRequest(@NotNull UUID participantId) {}
 
-    public record InviteRequest(@NotNull UUID studentId) {}
+    public record InviteRequest(@NotNull UUID participantId) {}
 
     private final ProjectQueryService queries;
     private final ProjectCreationService creation;
@@ -58,23 +58,23 @@ public class ProjectController {
         this.invitations = invitations;
     }
 
-    @GetMapping("/classes/{classId}/projects")
-    public List<ProjectView> list(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID classId) {
-        return queries.list(user, classId);
+    @GetMapping("/workspaces/{workspaceId}/projects")
+    public List<ProjectView> list(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID workspaceId) {
+        return queries.list(user, workspaceId);
     }
 
-    @PostMapping("/classes/{classId}/projects")
-    public ResponseEntity<ProjectView> create(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID classId,
+    @PostMapping("/workspaces/{workspaceId}/projects")
+    public ResponseEntity<ProjectView> create(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID workspaceId,
                                               @Valid @RequestBody CreateProjectRequest body) {
-        ProjectView created = creation.create(user, classId, new CreateProject(body.kind(), body.title(),
-            body.description(), body.teamName(), body.studentId(), body.memberIds(), body.representativeId(),
+        ProjectView created = creation.create(user, workspaceId, new CreateProject(body.kind(), body.title(),
+            body.description(), body.teamName(), body.participantId(), body.memberIds(), body.representativeId(),
             body.allowSizeException()));
         return ResponseEntity.created(URI.create("/api/v1/projects/" + created.id())).body(created);
     }
 
-    @GetMapping("/classes/{classId}/eligible-classmates")
-    public List<Classmate> eligibleClassmates(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID classId) {
-        return queries.eligibleClassmates(user, classId);
+    @GetMapping("/workspaces/{workspaceId}/eligible-participants")
+    public List<EligibleParticipant> eligibleParticipants(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID workspaceId) {
+        return queries.eligibleParticipants(user, workspaceId);
     }
 
     @GetMapping("/projects/{id}")
@@ -104,7 +104,7 @@ public class ProjectController {
     @PutMapping("/projects/{id}/representative")
     public ProjectView setRepresentative(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                                          @Valid @RequestBody RepresentativeRequest body) {
-        return membership.setRepresentative(user, id, body.studentId());
+        return membership.setRepresentative(user, id, body.participantId());
     }
 
     @GetMapping("/projects/{id}/membership-history")
@@ -124,7 +124,7 @@ public class ProjectController {
     @ResponseStatus(HttpStatus.CREATED)
     public InvitationView invite(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
                                  @Valid @RequestBody InviteRequest body) {
-        return invitations.invite(user, id, body.studentId());
+        return invitations.invite(user, id, body.participantId());
     }
 
     @DeleteMapping("/projects/{id}/invitations/{invitationId}")

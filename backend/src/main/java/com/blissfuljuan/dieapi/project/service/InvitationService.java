@@ -62,34 +62,34 @@ public class InvitationService {
     }
 
     @Transactional
-    public InvitationView invite(AppUserDetails user, UUID projectId, UUID studentId) {
+    public InvitationView invite(AppUserDetails user, UUID projectId, UUID participantId) {
         return mutation.run(projectId, Requires.ACTIVE_PROJECT, () -> policy.requireProjectEdit(user, projectId),
             null, (locked, role) -> {
                 if (locked.project().kind() != ProjectKind.TEAM) {
                     throw ApiException.conflict(ErrorCode.INVITATIONS_TEAM_ONLY, "Only team projects have invitations");
                 }
-                if (role == ProjectRole.REPRESENTATIVE && locked.cls().teamFormation() != TeamFormation.STUDENT_FORMED) {
-                    throw ApiException.forbidden(ErrorCode.TEAMS_ASSIGNED_BY_INSTRUCTOR, "Teams are assigned by your instructor in this class");
+                if (role == ProjectRole.REPRESENTATIVE && locked.cls().teamFormation() != TeamFormation.PARTICIPANT_FORMED) {
+                    throw ApiException.forbidden(ErrorCode.TEAMS_ASSIGNED_BY_COORDINATOR, "Teams are assigned by your coordinator in this workspace");
                 }
-                UUID classId = locked.project().classId();
-                if (studentId.equals(user.getId())) throw ApiException.badRequest(ErrorCode.CANNOT_INVITE_SELF, "You cannot invite yourself");
-                var student = classes.findStudentById(studentId)
-                    .filter(s -> s.role() == UserRole.STUDENT && s.status() != AccountStatus.DEACTIVATED);
-                var enrollment = classes.enrollmentStatus(classId, studentId);
+                UUID workspaceId = locked.project().workspaceId();
+                if (participantId.equals(user.getId())) throw ApiException.badRequest(ErrorCode.CANNOT_INVITE_SELF, "You cannot invite yourself");
+                var student = classes.findStudentById(participantId)
+                    .filter(s -> s.role() == UserRole.PARTICIPANT && s.status() != AccountStatus.DEACTIVATED);
+                var enrollment = classes.enrollmentStatus(workspaceId, participantId);
                 if (student.isEmpty() || enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED) {
                     // Same answer for unknown ids and students of other classes: no roster probing.
-                    throw ApiException.notFound(ErrorCode.CLASSMATE_NOT_FOUND, "Classmate not found");
+                    throw ApiException.notFound(ErrorCode.TEAMMATE_NOT_FOUND, "Teammate not found");
                 }
-                if (repo.activeProjectOf(classId, studentId).isPresent()) {
-                    throw ApiException.conflict(ErrorCode.STUDENT_ALREADY_IN_PROJECT, "The student already belongs to a project in this class");
+                if (repo.activeProjectOf(workspaceId, participantId).isPresent()) {
+                    throw ApiException.conflict(ErrorCode.PARTICIPANT_ALREADY_IN_PROJECT, "The participant already belongs to a project in this workspace");
                 }
                 int taken = repo.currentMembers(projectId).size() + repo.livePendingCount(projectId);
                 if (taken >= locked.cls().teamMaxSize()) {
                     throw ApiException.conflict(ErrorCode.TEAM_FULL, "The team is full (members plus pending invitations)");
                 }
-                UUID id = repo.insertInvitation(projectId, studentId, user.getId(), invitationDays);
+                UUID id = repo.insertInvitation(projectId, participantId, user.getId(), invitationDays);
                 events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_SENT, AuditResource.PROJECT, projectId.toString(),
-                    Map.of("invitationId", id.toString(), "studentId", studentId.toString())));
+                    Map.of("invitationId", id.toString(), "participantId", participantId.toString())));
                 return repo.pendingInvitations(projectId).stream().filter(i -> i.id().equals(id)).findFirst().orElseThrow();
             });
     }
@@ -116,26 +116,26 @@ public class InvitationService {
         // the invitation. Locking the invitation first could deadlock against the staff paths.
         UUID projectId = ownInvitation(user, invitationId, false).projectId();
         LockedProject locked = mutation.lockForInvitee(projectId);
-        UUID classId = locked.project().classId();
+        UUID workspaceId = locked.project().workspaceId();
         var inv = ownInvitation(user, invitationId, true);
         requireStillValid(inv);
         if (locked.project().status() != ProjectStatus.ACTIVE || locked.project().kind() != ProjectKind.TEAM
-            || locked.cls().teamFormation() != TeamFormation.STUDENT_FORMED) {
+            || locked.cls().teamFormation() != TeamFormation.PARTICIPANT_FORMED) {
             throw ApiException.conflict(ErrorCode.TEAM_NOT_ACCEPTING_MEMBERS, "This team is no longer accepting members");
         }
-        var enrollment = classes.enrollmentStatus(classId, user.getId());
+        var enrollment = classes.enrollmentStatus(workspaceId, user.getId());
         if (enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED) {
-            throw ApiException.conflict(ErrorCode.NOT_ENROLLED, "You are no longer enrolled in this class");
+            throw ApiException.conflict(ErrorCode.NOT_ENROLLED, "You are no longer enrolled in this workspace");
         }
-        if (repo.activeProjectOf(classId, user.getId()).isPresent()) {
-            throw ApiException.conflict(ErrorCode.ALREADY_IN_PROJECT, "You already belong to a project in this class");
+        if (repo.activeProjectOf(workspaceId, user.getId()).isPresent()) {
+            throw ApiException.conflict(ErrorCode.ALREADY_IN_PROJECT, "You already belong to a project in this workspace");
         }
         if (repo.currentMembers(projectId).size() >= locked.cls().teamMaxSize()) {
             throw ApiException.conflict(ErrorCode.TEAM_FULL, "The team is full");
         }
         team.add(projectId, user.getId(), TeamRole.MEMBER, user.getId());
         repo.setInvitationStatus(invitationId, InvitationStatus.ACCEPTED);
-        repo.cancelPendingForUserInClass(classId, user.getId());
+        repo.cancelPendingForUserInClass(workspaceId, user.getId());
         repo.touch(projectId);
         events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEAM_INVITATION_ACCEPTED, AuditResource.PROJECT, projectId.toString(),
             Map.of("invitationId", invitationId.toString())));

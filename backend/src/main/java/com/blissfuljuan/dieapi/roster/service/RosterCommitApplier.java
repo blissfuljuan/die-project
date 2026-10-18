@@ -35,21 +35,21 @@ public class RosterCommitApplier {
         this.resolvers = resolvers;
     }
 
-    public CommitResult apply(UUID importId, UUID classId, List<StoredRow> stored, UUID committer,
+    public CommitResult apply(UUID importId, UUID workspaceId, List<StoredRow> stored, UUID committer,
                               List<TempCredentialService.Prepared> prepared) {
         int enrolledExisting = 0, skippedDuplicates = 0, skippedByResolution = 0, invalid = 0;
         List<StoredRow> createdRows = new ArrayList<>();
         List<UUID> createdIds = new ArrayList<>();
         for (StoredRow r : stored) {
             switch (r.action()) {
-                case CREATE -> createdIds.add(createAccount(classId, r, committer, createdRows));
-                case MATCH -> enrolledExisting += enrollExisting(classId, r) ? 1 : 0;
+                case CREATE -> createdIds.add(createAccount(workspaceId, r, committer, createdRows));
+                case MATCH -> enrolledExisting += enrollExisting(workspaceId, r) ? 1 : 0;
                 case SKIP_DUPLICATE -> skippedDuplicates++;
                 case INVALID -> invalid++;
                 case CONFLICT -> {
                     CommitEffect effect = resolvers.forKind(r.conflictKind()).effectOf(r.resolution());
                     switch (effect) {
-                        case ENROLL_EXISTING -> enrolledExisting += enrollExisting(classId, r) ? 1 : 0;
+                        case ENROLL_EXISTING -> enrolledExisting += enrollExisting(workspaceId, r) ? 1 : 0;
                         case SKIP -> skippedByResolution++;
                     }
                 }
@@ -67,16 +67,16 @@ public class RosterCommitApplier {
             skippedByResolution, invalid, credentials);
     }
 
-    private UUID createAccount(UUID classId, StoredRow r, UUID createdBy, List<StoredRow> createdRows) {
+    private UUID createAccount(UUID workspaceId, StoredRow r, UUID createdBy, List<StoredRow> createdRows) {
         UUID id = repo.insertPendingStudent(r.studentNumber(), r.lastName(), r.firstName(), r.middleName(), createdBy);
-        enrollmentRules.enroll(classId, id, r.program(), r.section());
+        enrollmentRules.enroll(workspaceId, id, r.program(), r.section());
         createdRows.add(r);
         return id;
     }
 
     /** @return true if the student was newly enrolled or reinstated. */
-    private boolean enrollExisting(UUID classId, StoredRow r) {
-        return enrollmentRules.enroll(classId, r.matchedUserId(), r.program(), r.section())
+    private boolean enrollExisting(UUID workspaceId, StoredRow r) {
+        return enrollmentRules.enroll(workspaceId, r.matchedUserId(), r.program(), r.section())
             != EnrollmentRules.Outcome.ALREADY_ENROLLED;
     }
 }

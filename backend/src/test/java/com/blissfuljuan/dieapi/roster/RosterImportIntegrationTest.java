@@ -44,16 +44,16 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
     void seed() {
         sessions.clear();
         admin = user("admin@x.edu", "ADMIN", "ACTIVE", "Admin", "Root", null);
-        i1 = user("i1@x.edu", "INSTRUCTOR", "ACTIVE", "One", "Ian", null);
-        i2 = user("i2@x.edu", "INSTRUCTOR", "ACTIVE", "Two", "Ivy", null);
-        i3 = user("i3@x.edu", "INSTRUCTOR", "ACTIVE", "Three", "Ike", null);
-        emailOwner = user("taken@x.edu", "INSTRUCTOR", "ACTIVE", "Owner", "Email", null);
-        ana = user("ana@x.edu", "STUDENT", "ACTIVE", "Cruz", "Ana", "2024-0001");
-        ben = user("ben@x.edu", "STUDENT", "ACTIVE", "Diaz", "Ben", "2024-0002");
-        carl = user("carl@x.edu", "STUDENT", "ACTIVE", "Eze", "Carl", "2024-0003");
-        dina = user("dina@x.edu", "STUDENT", "ACTIVE", "Fox", "Dina", "2024-0004");
-        gone = user("gone@x.edu", "STUDENT", "DEACTIVATED", "Gone", "Student", "2024-0009");
-        outsiderStudent = user("out@x.edu", "STUDENT", "ACTIVE", "Out", "Side", "S-77");
+        i1 = user("i1@x.edu", "COORDINATOR", "ACTIVE", "One", "Ian", null);
+        i2 = user("i2@x.edu", "COORDINATOR", "ACTIVE", "Two", "Ivy", null);
+        i3 = user("i3@x.edu", "COORDINATOR", "ACTIVE", "Three", "Ike", null);
+        emailOwner = user("taken@x.edu", "COORDINATOR", "ACTIVE", "Owner", "Email", null);
+        ana = user("ana@x.edu", "PARTICIPANT", "ACTIVE", "Cruz", "Ana", "2024-0001");
+        ben = user("ben@x.edu", "PARTICIPANT", "ACTIVE", "Diaz", "Ben", "2024-0002");
+        carl = user("carl@x.edu", "PARTICIPANT", "ACTIVE", "Eze", "Carl", "2024-0003");
+        dina = user("dina@x.edu", "PARTICIPANT", "ACTIVE", "Fox", "Dina", "2024-0004");
+        gone = user("gone@x.edu", "PARTICIPANT", "DEACTIVATED", "Gone", "Student", "2024-0009");
+        outsiderStudent = user("out@x.edu", "PARTICIPANT", "ACTIVE", "Out", "Side", "S-77");
         c1 = clazz("CS101", "A", i1);
         c2 = clazz("CS102", "B", i2);
         enroll(c1, ben, "ENROLLED");
@@ -79,9 +79,9 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
         return id;
     }
 
-    private void enroll(UUID classId, UUID student, String status) {
+    private void enroll(UUID workspaceId, UUID student, String status) {
         jdbc.update("INSERT INTO enrollment (class_id, student_id, status, removed_at) VALUES (?, ?, ?, CASE WHEN ? = 'REMOVED' THEN now() END)",
-            classId, student, status, status);
+            workspaceId, student, status, status);
     }
 
     private Cookie as(UUID user) throws Exception {
@@ -108,15 +108,15 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
         return mvc.perform(req).andReturn();
     }
 
-    private MvcResult upload(UUID actor, UUID classId, String fileName, byte[] bytes) throws Exception {
-        var req = multipart("/api/v1/classes/" + classId + "/roster-imports")
+    private MvcResult upload(UUID actor, UUID workspaceId, String fileName, byte[] bytes) throws Exception {
+        var req = multipart("/api/v1/workspaces/" + workspaceId + "/roster-imports")
             .file(new MockMultipartFile("file", fileName, "application/octet-stream", bytes)).with(csrf());
         if (actor != null) req.cookie(as(actor));
         return mvc.perform(req).andReturn();
     }
 
-    private UUID uploadCsv(UUID actor, UUID classId, String csv) throws Exception {
-        MvcResult r = upload(actor, classId, "roster.csv", csv.getBytes(StandardCharsets.UTF_8));
+    private UUID uploadCsv(UUID actor, UUID workspaceId, String csv) throws Exception {
+        MvcResult r = upload(actor, workspaceId, "roster.csv", csv.getBytes(StandardCharsets.UTF_8));
         assertThat(r.getResponse().getStatus()).as(body(r)).isEqualTo(201);
         return UUID.fromString(JsonPath.read(body(r), "$.id"));
     }
@@ -226,7 +226,7 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
         // New accounts: pending students, enrolled, hashed credentials, emails only where unambiguous.
         assertThat(jdbc.queryForObject(
             "SELECT count(*) FROM app_user u JOIN enrollment e ON e.student_id = u.id AND e.class_id = ? AND e.status = 'ENROLLED' "
-                + "WHERE u.student_number LIKE '2024-01%' AND u.role = 'STUDENT' AND u.status = 'PENDING_ACTIVATION'",
+                + "WHERE u.student_number LIKE '2024-01%' AND u.role = 'PARTICIPANT' AND u.status = 'PENDING_ACTIVATION'",
             Integer.class, c1)).isEqualTo(4);
         // Emails in a roster are never applied: students supply and verify their own at activation.
         assertThat(jdbc.queryForObject("SELECT count(*) FROM app_user WHERE student_number LIKE '2024-01%' AND email IS NOT NULL", Integer.class)).isZero();
@@ -430,7 +430,7 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
     void commitRefusesAndWritesNothingWhenTheWorldChangedSincePreview() throws Exception {
         UUID importId = uploadCsv(i1, c1, HEADER + "2024-0500,Newman,Neil,,,,\n2024-0501,Other,Olga,,,,\n");
         // Someone creates the same student number between preview and commit.
-        user("neil@x.edu", "STUDENT", "ACTIVE", "Newman", "Neil", "2024-0500");
+        user("neil@x.edu", "PARTICIPANT", "ACTIVE", "Newman", "Neil", "2024-0500");
 
         MvcResult commit = call(i1, HttpMethod.POST, "/api/v1/roster-imports/" + importId + "/commit", null);
         assertThat(status(commit)).isEqualTo(409);
@@ -467,7 +467,7 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
         String missing = "/api/v1/roster-imports/" + UUID.randomUUID();
         String detailOfMissing = JsonPath.read(body(call(admin, HttpMethod.GET, missing, null)), "$.detail");
 
-        // Instructors of other classes, unassigned instructors, unrelated and enrolled students: all 404 on the import.
+        // Instructors of other classes, unassigned coordinators, unrelated and enrolled students: all 404 on the import.
         for (UUID outsider : List.of(i2, i3, outsiderStudent, ben)) {
             assertThat(status(call(outsider, HttpMethod.GET, base, null))).as("detail as " + outsider).isEqualTo(404);
             assertThat((String) JsonPath.read(body(call(outsider, HttpMethod.GET, base, null)), "$.detail")).isEqualTo(detailOfMissing);
@@ -478,10 +478,10 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
         // Class-level endpoints: invisible class -> 404, visible-but-not-staff (enrolled student) -> 403.
         for (UUID outsider : List.of(i2, i3, outsiderStudent)) {
             assertThat(status(upload(outsider, c1, "roster.csv", (HEADER + "2024-0701,A,B,,,,\n").getBytes(StandardCharsets.UTF_8)))).isEqualTo(404);
-            assertThat(status(call(outsider, HttpMethod.GET, "/api/v1/classes/" + c1 + "/roster-imports", null))).isEqualTo(404);
+            assertThat(status(call(outsider, HttpMethod.GET, "/api/v1/workspaces/" + c1 + "/roster-imports", null))).isEqualTo(404);
         }
         assertThat(status(upload(ben, c1, "roster.csv", (HEADER + "2024-0701,A,B,,,,\n").getBytes(StandardCharsets.UTF_8)))).isEqualTo(403);
-        assertThat(status(call(ben, HttpMethod.GET, "/api/v1/classes/" + c1 + "/roster-imports", null))).isEqualTo(403);
+        assertThat(status(call(ben, HttpMethod.GET, "/api/v1/workspaces/" + c1 + "/roster-imports", null))).isEqualTo(403);
 
         // Anonymous.
         assertThat(status(call(null, HttpMethod.GET, base, null))).isEqualTo(401);
@@ -496,10 +496,10 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
         // Staff of the class (and admins) can.
         assertThat(status(call(i1, HttpMethod.GET, base, null))).isEqualTo(200);
         assertThat(status(call(admin, HttpMethod.GET, base, null))).isEqualTo(200);
-        assertThat(status(call(i1, HttpMethod.GET, "/api/v1/classes/" + c1 + "/roster-imports", null))).isEqualTo(200);
+        assertThat(status(call(i1, HttpMethod.GET, "/api/v1/workspaces/" + c1 + "/roster-imports", null))).isEqualTo(200);
         // Imports of one class are not reachable through another class's staff, even with a valid session.
-        assertThat(status(call(i2, HttpMethod.GET, "/api/v1/classes/" + c2 + "/roster-imports", null))).isEqualTo(200);
-        assertThat((List<Object>) JsonPath.read(body(call(i2, HttpMethod.GET, "/api/v1/classes/" + c2 + "/roster-imports", null)), "$")).isEmpty();
+        assertThat(status(call(i2, HttpMethod.GET, "/api/v1/workspaces/" + c2 + "/roster-imports", null))).isEqualTo(200);
+        assertThat((List<Object>) JsonPath.read(body(call(i2, HttpMethod.GET, "/api/v1/workspaces/" + c2 + "/roster-imports", null)), "$")).isEmpty();
     }
 
     // ---- reissue of lost credentials ----
@@ -509,17 +509,17 @@ class RosterImportIntegrationTest extends PostgresIntegrationTest {
         UUID importId = uploadCsv(i1, c1, HEADER + "2024-0800,Lost,Lia,,,,\n");
         MvcResult committed = call(i1, HttpMethod.POST, "/api/v1/roster-imports/" + importId + "/commit", null);
         String oldSecret = credentialOf(body(committed), "2024-0800");
-        UUID lia = UUID.fromString(((List<String>) JsonPath.read(body(committed), "$.credentials[*].studentId")).get(0));
-        String url = "/api/v1/classes/" + c1 + "/enrollments/" + lia + "/temporary-credential";
+        UUID lia = UUID.fromString(((List<String>) JsonPath.read(body(committed), "$.credentials[*].participantId")).get(0));
+        String url = "/api/v1/workspaces/" + c1 + "/enrollments/" + lia + "/temporary-credential";
 
         for (UUID denied : List.of(i2, i3, outsiderStudent)) {
             assertThat(status(call(denied, HttpMethod.POST, url, null))).as("outsider " + denied).isEqualTo(404);
         }
         assertThat(status(call(ben, HttpMethod.POST, url, null))).as("enrolled student").isEqualTo(403);
         assertThat(status(call(null, HttpMethod.POST, url, null))).isEqualTo(401);
-        assertThat(status(call(i1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/enrollments/" + ana + "/temporary-credential", null)))
+        assertThat(status(call(i1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/enrollments/" + ana + "/temporary-credential", null)))
             .as("not enrolled in this class").isEqualTo(404);
-        assertThat(status(call(i1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/enrollments/" + ben + "/temporary-credential", null)))
+        assertThat(status(call(i1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/enrollments/" + ben + "/temporary-credential", null)))
             .as("already activated").isEqualTo(409);
 
         MvcResult reissued = call(i1, HttpMethod.POST, url, null);

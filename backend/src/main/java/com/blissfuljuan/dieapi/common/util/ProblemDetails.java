@@ -21,7 +21,7 @@ import java.time.Instant;
  * <pre>
  * { "type": "about:blank", "title": "Not Found", "status": 404,
  *   "detail": "Class not found",            // a sentence a person can read
- *   "instance": "/api/v1/classes/...",      // the request path
+ *   "instance": "/api/v1/workspaces/...",      // the request path
  *   "code": "CLASS_NOT_FOUND",              // stable, machine-readable: clients branch on this
  *   "timestamp": "2026-10-15T14:05:18Z",
  *   "traceId": "…",                         // also the X-Request-Id response header and in the server log

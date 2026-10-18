@@ -52,7 +52,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         PUBLIC,          // reachable without a session (login, activation, reset, csrf)
         SELF,            // any signed-in user; only touches the caller's own data
         ADMIN,           // @PreAuthorize hasRole('ADMIN')
-        ROLE_STAFF,      // @PreAuthorize hasAnyRole('ADMIN','INSTRUCTOR')
+        ROLE_STAFF,      // @PreAuthorize hasAnyRole('ADMIN','COORDINATOR')
         CLASS_VIEW,      // AccessPolicy.requireClassView
         CLASS_MANAGE,    // AccessPolicy.requireClassManage
         IMPORT,          // roster import: staff of its class only, everyone else 404
@@ -85,14 +85,14 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
     void fixtures() {
         sessions.clear();
         admin = user("admin", "ADMIN", null);
-        iA = user("iA", "INSTRUCTOR", null);
-        iB = user("iB", "INSTRUCTOR", null);
-        sR = user("sR", "STUDENT", "S-R");
-        sM = user("sM", "STUDENT", "S-M");
-        sC = user("sC", "STUDENT", "S-C");
-        sI = user("sI", "STUDENT", "S-I");
-        sB = user("sB", "STUDENT", "S-B");
-        sOut = user("sOut", "STUDENT", "S-OUT");
+        iA = user("iA", "COORDINATOR", null);
+        iB = user("iB", "COORDINATOR", null);
+        sR = user("sR", "PARTICIPANT", "S-R");
+        sM = user("sM", "PARTICIPANT", "S-M");
+        sC = user("sC", "PARTICIPANT", "S-C");
+        sI = user("sI", "PARTICIPANT", "S-I");
+        sB = user("sB", "PARTICIPANT", "S-B");
+        sOut = user("sOut", "PARTICIPANT", "S-OUT");
         classA = clazz("CSA", iA);
         classB = clazz("CSB", iB);
         for (UUID s : List.of(sR, sM, sC, sI)) jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", classA, s);
@@ -112,7 +112,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
     // ---- the manifest: one row per endpoint ----
 
     private List<Ep> manifest() {
-        String a = "/api/v1/classes/" + classA;
+        String a = "/api/v1/workspaces/" + classA;
         String p = "/api/v1/projects/" + projectA;
         String imp = "/api/v1/roster-imports/" + importA;
         String user = "/api/v1/users/" + sC;
@@ -121,6 +121,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
 
         // --- authentication and account recovery (public) / session (self)
         m.add(ep("GET", "/api/v1/auth/csrf", Rule.PUBLIC, "/api/v1/auth/csrf", none));
+        m.add(ep("GET", "/api/v1/status", Rule.PUBLIC, "/api/v1/status", none));
         m.add(ep("POST", "/api/v1/auth/login", Rule.PUBLIC, "/api/v1/auth/login", () -> "{\"email\":\"nobody@x.edu\",\"password\":\"x\"}"));
         m.add(ep("POST", "/api/v1/auth/activation/check", Rule.PUBLIC, "/api/v1/auth/activation/check", () -> "{\"identifier\":\"nobody\",\"temporaryCredential\":\"x\"}"));
         m.add(ep("POST", "/api/v1/auth/activation/begin", Rule.PUBLIC, "/api/v1/auth/activation/begin",
@@ -137,7 +138,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         // --- user administration (admin only)
         m.add(ep("GET", "/api/v1/users", Rule.ADMIN, "/api/v1/users", none));
         m.add(ep("POST", "/api/v1/users", Rule.ADMIN, "/api/v1/users",
-            () -> "{\"role\":\"INSTRUCTOR\",\"lastName\":\"Z\",\"firstName\":\"Z\",\"email\":\"zz@x.edu\"}"));
+            () -> "{\"role\":\"COORDINATOR\",\"lastName\":\"Z\",\"firstName\":\"Z\",\"email\":\"zz@x.edu\"}"));
         m.add(ep("GET", "/api/v1/users/{id}", Rule.ADMIN, user, none));
         m.add(ep("PATCH", "/api/v1/users/{id}", Rule.ADMIN, user, () -> "{\"version\":0,\"firstName\":\"X\"}"));
         m.add(ep("POST", "/api/v1/users/{id}/deactivate", Rule.ADMIN, user + "/deactivate", none));
@@ -145,23 +146,23 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         m.add(ep("POST", "/api/v1/users/{id}/reset-credentials", Rule.ADMIN, user + "/reset-credentials", none));
 
         // --- classes and enrollment
-        m.add(ep("GET", "/api/v1/classes", Rule.SELF, "/api/v1/classes", none));
-        m.add(ep("POST", "/api/v1/classes", Rule.ROLE_STAFF, "/api/v1/classes",
-            () -> "{\"academicYear\":\"2030\",\"semester\":\"1st\",\"subjectCode\":\"NEW1\",\"subjectName\":\"New\",\"section\":\"A\",\"instructorIds\":[\"" + iA + "\"]}"));
-        m.add(ep("GET", "/api/v1/classes/{id}", Rule.CLASS_VIEW, a, none));
-        m.add(ep("PATCH", "/api/v1/classes/{id}", Rule.CLASS_MANAGE, a, () -> "{\"version\":" + classVersion() + ",\"section\":\"Z\"}"));
-        m.add(ep("POST", "/api/v1/classes/{id}/archive", Rule.CLASS_MANAGE, a + "/archive", none));
-        m.add(ep("POST", "/api/v1/classes/{id}/unarchive", Rule.ADMIN, a + "/unarchive", none));
-        m.add(ep("PUT", "/api/v1/classes/{id}/instructors", Rule.ADMIN, a + "/instructors", () -> "{\"instructorIds\":[\"" + iA + "\"]}"));
-        m.add(ep("GET", "/api/v1/classes/{id}/enrollments", Rule.CLASS_MANAGE, a + "/enrollments", none));
-        m.add(ep("POST", "/api/v1/classes/{id}/enrollments", Rule.CLASS_MANAGE, a + "/enrollments", () -> "{\"studentNumber\":\"S-OUT\"}"));
-        m.add(ep("DELETE", "/api/v1/classes/{id}/enrollments/{studentId}", Rule.CLASS_MANAGE, a + "/enrollments/" + sC, none));
-        m.add(ep("POST", "/api/v1/classes/{id}/enrollments/{studentId}/temporary-credential", Rule.CLASS_MANAGE,
+        m.add(ep("GET", "/api/v1/workspaces", Rule.SELF, "/api/v1/workspaces", none));
+        m.add(ep("POST", "/api/v1/workspaces", Rule.ROLE_STAFF, "/api/v1/workspaces",
+            () -> "{\"academicYear\":\"2030\",\"semester\":\"1st\",\"subjectCode\":\"NEW1\",\"subjectName\":\"New\",\"section\":\"A\",\"coordinatorIds\":[\"" + iA + "\"]}"));
+        m.add(ep("GET", "/api/v1/workspaces/{id}", Rule.CLASS_VIEW, a, none));
+        m.add(ep("PATCH", "/api/v1/workspaces/{id}", Rule.CLASS_MANAGE, a, () -> "{\"version\":" + classVersion() + ",\"section\":\"Z\"}"));
+        m.add(ep("POST", "/api/v1/workspaces/{id}/archive", Rule.CLASS_MANAGE, a + "/archive", none));
+        m.add(ep("POST", "/api/v1/workspaces/{id}/unarchive", Rule.ADMIN, a + "/unarchive", none));
+        m.add(ep("PUT", "/api/v1/workspaces/{id}/coordinators", Rule.ADMIN, a + "/coordinators", () -> "{\"coordinatorIds\":[\"" + iA + "\"]}"));
+        m.add(ep("GET", "/api/v1/workspaces/{id}/enrollments", Rule.CLASS_MANAGE, a + "/enrollments", none));
+        m.add(ep("POST", "/api/v1/workspaces/{id}/enrollments", Rule.CLASS_MANAGE, a + "/enrollments", () -> "{\"studentNumber\":\"S-OUT\"}"));
+        m.add(ep("DELETE", "/api/v1/workspaces/{id}/enrollments/{participantId}", Rule.CLASS_MANAGE, a + "/enrollments/" + sC, none));
+        m.add(ep("POST", "/api/v1/workspaces/{id}/enrollments/{participantId}/temporary-credential", Rule.CLASS_MANAGE,
             a + "/enrollments/" + sC + "/temporary-credential", none));
 
         // --- roster import
-        m.add(new Ep("POST", "/api/v1/classes/{classId}/roster-imports", Rule.CLASS_MANAGE, () -> a + "/roster-imports", none, true));
-        m.add(ep("GET", "/api/v1/classes/{classId}/roster-imports", Rule.CLASS_MANAGE, a + "/roster-imports", none));
+        m.add(new Ep("POST", "/api/v1/workspaces/{workspaceId}/roster-imports", Rule.CLASS_MANAGE, () -> a + "/roster-imports", none, true));
+        m.add(ep("GET", "/api/v1/workspaces/{workspaceId}/roster-imports", Rule.CLASS_MANAGE, a + "/roster-imports", none));
         m.add(ep("GET", "/api/v1/roster-imports/{id}", Rule.IMPORT, imp, none));
         m.add(ep("PUT", "/api/v1/roster-imports/{id}/resolutions", Rule.IMPORT, imp + "/resolutions",
             () -> "{\"resolutions\":[{\"rowNumber\":2,\"resolution\":\"SKIP\"}]}"));
@@ -169,18 +170,18 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         m.add(ep("DELETE", "/api/v1/roster-imports/{id}", Rule.IMPORT, imp, none));
 
         // --- projects, teams and invitations
-        m.add(ep("GET", "/api/v1/classes/{classId}/projects", Rule.CLASS_VIEW, a + "/projects", none));
-        m.add(ep("POST", "/api/v1/classes/{classId}/projects", Rule.CLASS_VIEW, a + "/projects", () -> "{\"kind\":\"TEAM\",\"title\":\"T\"}"));
-        m.add(ep("GET", "/api/v1/classes/{classId}/eligible-classmates", Rule.CLASS_VIEW, a + "/eligible-classmates", none));
+        m.add(ep("GET", "/api/v1/workspaces/{workspaceId}/projects", Rule.CLASS_VIEW, a + "/projects", none));
+        m.add(ep("POST", "/api/v1/workspaces/{workspaceId}/projects", Rule.CLASS_VIEW, a + "/projects", () -> "{\"kind\":\"TEAM\",\"title\":\"T\"}"));
+        m.add(ep("GET", "/api/v1/workspaces/{workspaceId}/eligible-participants", Rule.CLASS_VIEW, a + "/eligible-participants", none));
         m.add(ep("GET", "/api/v1/projects/{id}", Rule.PROJECT_VIEW, p, none));
         m.add(ep("PATCH", "/api/v1/projects/{id}", Rule.PROJECT_EDIT, p, () -> "{\"version\":" + projectVersion() + ",\"title\":\"X\"}"));
         m.add(ep("POST", "/api/v1/projects/{id}/archive", Rule.PROJECT_STAFF, p + "/archive", none));
         m.add(ep("PUT", "/api/v1/projects/{id}/members", Rule.PROJECT_STAFF, p + "/members",
             () -> "{\"version\":" + projectVersion() + ",\"memberIds\":[\"" + sR + "\",\"" + sC + "\"]}"));
-        m.add(ep("PUT", "/api/v1/projects/{id}/representative", Rule.PROJECT_EDIT, p + "/representative", () -> "{\"studentId\":\"" + sM + "\"}"));
+        m.add(ep("PUT", "/api/v1/projects/{id}/representative", Rule.PROJECT_EDIT, p + "/representative", () -> "{\"participantId\":\"" + sM + "\"}"));
         m.add(ep("GET", "/api/v1/projects/{id}/membership-history", Rule.PROJECT_STAFF, p + "/membership-history", none));
         m.add(ep("POST", "/api/v1/projects/{id}/leave", Rule.PROJECT_MEMBER, p + "/leave", none));
-        m.add(ep("POST", "/api/v1/projects/{id}/invitations", Rule.PROJECT_EDIT, p + "/invitations", () -> "{\"studentId\":\"" + sC + "\"}"));
+        m.add(ep("POST", "/api/v1/projects/{id}/invitations", Rule.PROJECT_EDIT, p + "/invitations", () -> "{\"participantId\":\"" + sC + "\"}"));
         m.add(ep("DELETE", "/api/v1/projects/{id}/invitations/{invitationId}", Rule.PROJECT_EDIT, p + "/invitations/" + invitationA, none));
         m.add(ep("GET", "/api/v1/invitations", Rule.SELF, "/api/v1/invitations", none));
         m.add(ep("POST", "/api/v1/invitations/{id}/accept", Rule.INVITEE, "/api/v1/invitations/" + invitationA + "/accept", none));
@@ -272,7 +273,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
             String expression = preAuthorize(hm);
             switch (ep.rule()) {
                 case ADMIN -> assertThat(expression).as(ep.key()).contains("hasRole('ADMIN')");
-                case ROLE_STAFF -> assertThat(expression).as(ep.key()).contains("hasAnyRole('ADMIN','INSTRUCTOR')");
+                case ROLE_STAFF -> assertThat(expression).as(ep.key()).contains("hasAnyRole('ADMIN','COORDINATOR')");
                 default -> assertThat(expression).as(ep.key() + " is " + ep.rule() + ": role gates belong to ADMIN/ROLE_STAFF rules")
                     .doesNotContain("hasRole('ADMIN')");
             }
@@ -380,7 +381,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
     private UUID clazz(String code, UUID instructor) {
         UUID id = jdbc.queryForObject("""
             INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section, team_formation, team_min_size, team_max_size)
-            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', 'STUDENT_FORMED', 2, 4) RETURNING id
+            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', 'PARTICIPANT_FORMED', 2, 4) RETURNING id
             """, UUID.class, code);
         jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", id, instructor);
         return id;

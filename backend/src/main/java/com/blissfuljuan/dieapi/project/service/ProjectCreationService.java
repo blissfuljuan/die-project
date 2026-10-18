@@ -46,13 +46,13 @@ public class ProjectCreationService {
     }
 
     @Transactional
-    public ProjectView create(AppUserDetails user, UUID classId, CreateProject req) {
-        if (user.role() == UserRole.STUDENT) {
-            policy.requireClassView(user, classId);
+    public ProjectView create(AppUserDetails user, UUID workspaceId, CreateProject req) {
+        if (user.role() == UserRole.PARTICIPANT) {
+            policy.requireClassView(user, workspaceId);
         } else {
-            policy.requireClassManage(user, classId);
+            policy.requireClassManage(user, workspaceId);
         }
-        var cls = mutation.lockWritableClass(classId);
+        var cls = mutation.lockWritableClass(workspaceId);
 
         ProjectKind kind = ProjectKind.parse(req.kind());
         if (kind == null) throw ApiException.badRequest(ErrorCode.INVALID_PROJECT_KIND, "kind must be INDIVIDUAL or TEAM");
@@ -63,9 +63,9 @@ public class ProjectCreationService {
         if (kind == ProjectKind.INDIVIDUAL) teamName = null;
 
         ProjectCreationStrategy strategy = strategies.forCase(user.role(), kind);
-        UUID projectId = strategy.create(new ProjectCreation(user, classId, cls, kind, title, description, teamName, req));
+        UUID projectId = strategy.create(new ProjectCreation(user, workspaceId, cls, kind, title, description, teamName, req));
         events.publishEvent(AuditEvent.of(user.getId(), AuditAction.PROJECT_CREATED, AuditResource.PROJECT, projectId.toString(),
-            Map.of("classId", classId.toString(), "kind", kind.name())));
+            Map.of("workspaceId", workspaceId.toString(), "kind", kind.name())));
         return views.viewOf(projectId, strategy.creatorRole());
     }
 }

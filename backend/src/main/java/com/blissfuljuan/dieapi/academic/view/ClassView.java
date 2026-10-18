@@ -14,15 +14,15 @@ public record ClassView(
     String teamFormation,
     int teamMinSize,
     int teamMaxSize,
-    boolean studentsMayChangeTeams,
+    boolean participantsMayChangeTeams,
     int enrolledCount,
     long version,
-    List<InstructorRef> instructors) {
+    List<CoordinatorRef> coordinators) {
 
-    public record InstructorRef(UUID id, String firstName, String lastName) {}
+    public record CoordinatorRef(UUID id, String firstName, String lastName) {}
 
-    public ClassView withInstructors(List<InstructorRef> list) {
+    public ClassView withCoordinators(List<CoordinatorRef> list) {
         return new ClassView(id, academicYear, semester, subjectCode, subjectName, section, status,
-            teamFormation, teamMinSize, teamMaxSize, studentsMayChangeTeams, enrolledCount, version, list);
+            teamFormation, teamMinSize, teamMaxSize, participantsMayChangeTeams, enrolledCount, version, list);
     }
 }

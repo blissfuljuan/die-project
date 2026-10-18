@@ -22,27 +22,36 @@ class ClassAccess {
         this.roles = roles;
     }
 
-    ClassRole classRole(AppUserDetails user, UUID classId) {
-        return roles.forRole(user.role()).classRole(user.getId(), classId);
+    ClassRole classRole(AppUserDetails user, UUID workspaceId) {
+        return roles.forRole(user.role()).classRole(user.getId(), workspaceId);
     }
 
     /** Caller may read the class (staff of the class, admins, enrolled students). Otherwise 404. */
-    ClassRole requireView(AppUserDetails user, UUID classId) {
-        if (!repo.classExists(classId)) {
+    ClassRole requireView(AppUserDetails user, UUID workspaceId) {
+        if (!repo.classExists(workspaceId)) {
             throw notFound();
         }
-        ClassRole role = classRole(user, classId);
+        ClassRole role = classRole(user, workspaceId);
         if (role == ClassRole.NONE) {
             throw notFound();
         }
         return role;
     }
 
-    /** Caller may change the class, its instructors and its roster: admins and instructors assigned to it. */
-    ClassRole requireManage(AppUserDetails user, UUID classId) {
-        ClassRole role = requireView(user, classId);
+    /** Caller may change the class, its coordinators and its roster: admins and coordinators assigned to it. */
+    ClassRole requireManage(AppUserDetails user, UUID workspaceId) {
+        ClassRole role = requireView(user, workspaceId);
         if (!role.canManage()) {
             throw AccessPolicy.accessDenied();
+        }
+        return role;
+    }
+
+    /** Content access: view plus a role that may read content. Administrators get the 404 outsiders get. */
+    ClassRole requireContent(AppUserDetails user, UUID workspaceId) {
+        ClassRole role = requireView(user, workspaceId);
+        if (!role.canAccessContent()) {
+            throw notFound();
         }
         return role;
     }
@@ -52,6 +61,6 @@ class ClassAccess {
     }
 
     static ApiException notFound() {
-        return ApiException.notFound(ErrorCode.CLASS_NOT_FOUND, "Class not found");
+        return ApiException.notFound(ErrorCode.CLASS_NOT_FOUND, "Workspace not found");
     }
 }

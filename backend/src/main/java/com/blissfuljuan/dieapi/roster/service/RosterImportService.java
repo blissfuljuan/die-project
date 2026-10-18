@@ -29,7 +29,7 @@ import java.util.*;
 /**
  * Roster import: upload -> preview -> resolve conflicts -> commit.
  *
- * Authorization is always the class's: only admins and instructors assigned to the class may touch
+ * Authorization is always the class's: only admins and coordinators assigned to the class may touch
  * an import; anyone else gets the same 404 as for an import that does not exist.
  * Commit is one transaction. It re-analyzes the stored rows against the current database and refuses
  * (409, nothing written) if any outcome changed since the preview. Temporary credentials are returned
@@ -74,19 +74,19 @@ public class RosterImportService {
     // ---- upload / preview ----
 
     @Transactional
-    public ImportView upload(AppUserDetails user, UUID classId, String rawFileName, byte[] bytes) {
-        policy.requireClassManage(user, classId);
+    public ImportView upload(AppUserDetails user, UUID workspaceId, String rawFileName, byte[] bytes) {
+        policy.requireClassManage(user, workspaceId);
 
         // Parse (CPU/memory heavy, no database) before taking the class lock, so a slow or hostile file
         // cannot block enrollment and team changes for the whole class.
         String fileName = RosterParser.cleanFileName(rawFileName);
         List<NormalizedRow> parsed = parser.parse(fileName, bytes);
-        assertWritable(classId);
-        List<StoredRow> analyzed = analyzer.classify(classId, parsed, user);
+        assertWritable(workspaceId);
+        List<StoredRow> analyzed = analyzer.classify(workspaceId, parsed, user);
 
-        UUID id = repo.insertImport(classId, user.getId(), fileName, Tokens.sha256(bytes));
+        UUID id = repo.insertImport(workspaceId, user.getId(), fileName, Tokens.sha256(bytes));
         analyzed.forEach(r -> repo.insertRow(id, r));
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_PREVIEWED, AuditResource.CLASS, classId.toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_PREVIEWED, AuditResource.CLASS, workspaceId.toString(),
             Map.of("importId", id.toString(), "rows", analyzed.size())));
         return queries.view(repo.find(id, false).orElseThrow());
     }
@@ -111,7 +111,7 @@ public class RosterImportService {
             }
             repo.setResolution(importId, c.rowNumber(), chosen);
         }
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_CONFLICTS_RESOLVED, AuditResource.CLASS, h.classId().toString(),
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_CONFLICTS_RESOLVED, AuditResource.CLASS, h.workspaceId().toString(),
             Map.of("importId", importId.toString(), "count", changes.size())));
         return queries.view(h);
     }
@@ -162,20 +162,20 @@ public class RosterImportService {
             return support.previouslyCommitted(h);           // another commit won the race while we were hashing
         }
         requirePreview(h);
-        UUID classId = h.classId();
-        assertWritable(classId);
+        UUID workspaceId = h.workspaceId();
+        assertWritable(workspaceId);
 
         List<StoredRow> stored = repo.allRows(importId);
         int unresolved = repo.summary(importId).unresolvedConflicts();
         if (unresolved > 0) {
             throw ApiException.conflict(ErrorCode.UNRESOLVED_CONFLICTS, unresolved + " conflict(s) still need a resolution");
         }
-        support.assertUnchangedSincePreview(classId, stored, user);
+        support.assertUnchangedSincePreview(workspaceId, stored, user);
         if (stored.stream().filter(r -> r.action() == RowOutcome.CREATE).count() != prepared.size()) {
             throw ApiException.conflict(ErrorCode.IMPORT_CHANGED, "The import changed while it was being prepared; try again");
         }
 
-        CommitResult result = applier.apply(importId, classId, stored, user.getId(), prepared);
+        CommitResult result = applier.apply(importId, workspaceId, stored, user.getId(), prepared);
 
         Map<String, Object> counts = new LinkedHashMap<>();
         counts.put("created", result.created());
@@ -187,8 +187,8 @@ public class RosterImportService {
 
         Map<String, Object> auditDetails = new LinkedHashMap<>(counts);
         auditDetails.put("importId", importId.toString());
-        auditDetails.put("createdAccounts", result.credentials().stream().map(c -> c.studentId().toString()).toList());
-        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_COMMITTED, AuditResource.CLASS, classId.toString(), auditDetails));
+        auditDetails.put("createdAccounts", result.credentials().stream().map(c -> c.participantId().toString()).toList());
+        events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_COMMITTED, AuditResource.CLASS, workspaceId.toString(), auditDetails));
         return result;
     }
 
@@ -200,17 +200,17 @@ public class RosterImportService {
         }
         if (h.status() == ImportStatus.PREVIEW) {
             repo.setStatus(importId, ImportStatus.CANCELLED);
-            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_CANCELLED, AuditResource.CLASS, h.classId().toString(),
+            events.publishEvent(AuditEvent.of(user.getId(), AuditAction.ROSTER_IMPORT_CANCELLED, AuditResource.CLASS, h.workspaceId().toString(),
                 Map.of("importId", importId.toString())));
         }
     }
 
     // ---- helpers ----
 
-    private void assertWritable(UUID classId) {
-        var cls = classes.lock(classId).orElseThrow(AccessPolicy::classNotFound);
+    private void assertWritable(UUID workspaceId) {
+        var cls = classes.lock(workspaceId).orElseThrow(AccessPolicy::classNotFound);
         if (cls.status() == ClassStatus.ARCHIVED) {
-            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The class is archived and read-only");
+            throw ApiException.conflict(ErrorCode.CLASS_ARCHIVED, "The workspace is archived and read-only");
         }
     }
 

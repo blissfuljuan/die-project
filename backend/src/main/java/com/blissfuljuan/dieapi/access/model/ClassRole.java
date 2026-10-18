@@ -1,10 +1,15 @@
 package com.blissfuljuan.dieapi.access.model;
 
-/** What the caller is to a given class. Ordered by capability. */
+/** What the caller is to a given workspace. Ordered by capability. */
 public enum ClassRole {
-    NONE, STUDENT, INSTRUCTOR, ADMIN;
+    NONE, PARTICIPANT, COORDINATOR, ADMIN;
 
     public boolean canManage() {
-        return this == INSTRUCTOR || this == ADMIN;
+        return this == COORDINATOR || this == ADMIN;
+    }
+
+    /** Workspace content (requirements, workflows, templates, evaluations): administrators have none. */
+    public boolean canAccessContent() {
+        return this == PARTICIPANT || this == COORDINATOR;
     }
 }

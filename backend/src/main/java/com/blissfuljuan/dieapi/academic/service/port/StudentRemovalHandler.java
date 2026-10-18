@@ -11,5 +11,5 @@ import java.util.UUID;
  */
 public interface StudentRemovalHandler {
 
-    void onStudentRemovedFromClass(UUID classId, UUID studentId, UUID actor);
+    void onStudentRemovedFromClass(UUID workspaceId, UUID participantId, UUID actor);
 }

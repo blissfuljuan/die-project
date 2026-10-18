@@ -111,10 +111,10 @@ class P1AcceptanceTest extends PostgresIntegrationTest {
         // ===== Criterion 1a: the administrator creates accounts =====
         Cookie admin = signIn("admin@school.edu", ADMIN_PASSWORD);
         MvcResult instructorAccount = ok(send(admin, HttpMethod.POST, "/api/v1/users",
-            "{\"role\":\"INSTRUCTOR\",\"lastName\":\"Reyes\",\"firstName\":\"Ivy\",\"email\":\"ivy@school.edu\"}"));
+            "{\"role\":\"COORDINATOR\",\"lastName\":\"Reyes\",\"firstName\":\"Ivy\",\"email\":\"ivy@school.edu\"}"));
         String instructorTemp = JsonPath.read(body(instructorAccount), "$.temporaryCredential");
         MvcResult studentAccount = ok(send(admin, HttpMethod.POST, "/api/v1/users",
-            "{\"role\":\"STUDENT\",\"studentNumber\":\"2025-0001\",\"lastName\":\"Cruz\",\"firstName\":\"Ana\"}"));
+            "{\"role\":\"PARTICIPANT\",\"studentNumber\":\"2025-0001\",\"lastName\":\"Cruz\",\"firstName\":\"Ana\"}"));
         String studentTemp = JsonPath.read(body(studentAccount), "$.temporaryCredential");
         assertThat((String) JsonPath.read(body(studentAccount), "$.user.status")).isEqualTo("PENDING_ACTIVATION");
 
@@ -132,11 +132,11 @@ class P1AcceptanceTest extends PostgresIntegrationTest {
         Cookie instructor = signIn("ivy@school.edu", NEW_PASSWORD);
 
         // ===== Criterion 3: the instructor creates a class and manages the roster =====
-        MvcResult cls = ok(send(instructor, HttpMethod.POST, "/api/v1/classes",
+        MvcResult cls = ok(send(instructor, HttpMethod.POST, "/api/v1/workspaces",
             "{\"academicYear\":\"2025-2026\",\"semester\":\"1st\",\"subjectCode\":\"CS101\",\"subjectName\":\"Software Engineering\","
-                + "\"section\":\"A\",\"teamFormation\":\"STUDENT_FORMED\",\"teamMinSize\":2,\"teamMaxSize\":3}"));
-        UUID classId = id(cls, "$.id");
-        String classUrl = "/api/v1/classes/" + classId;
+                + "\"section\":\"A\",\"teamFormation\":\"PARTICIPANT_FORMED\",\"teamMinSize\":2,\"teamMaxSize\":3}"));
+        UUID workspaceId = id(cls, "$.id");
+        String classUrl = "/api/v1/workspaces/" + workspaceId;
         // The admin created this never-activated account, so the admin places it (an instructor may not claim it).
         ok(send(admin, HttpMethod.POST, classUrl + "/enrollments", "{\"studentNumber\":\"2025-0001\",\"program\":\"BSCS\",\"section\":\"1A\"}"));
 
@@ -171,7 +171,7 @@ class P1AcceptanceTest extends PostgresIntegrationTest {
         Cookie ana = signIn("ana@school.edu", NEW_PASSWORD);
         Cookie noel = signIn("noel@school.edu", NEW_PASSWORD);
         Cookie quin = signIn("quin@school.edu", NEW_PASSWORD);
-        assertThat((List<String>) JsonPath.read(body(ok(send(ana, HttpMethod.GET, "/api/v1/classes", null))), "$.items[*].subjectCode")).containsExactly("CS101");
+        assertThat((List<String>) JsonPath.read(body(ok(send(ana, HttpMethod.GET, "/api/v1/workspaces", null))), "$.items[*].subjectCode")).containsExactly("CS101");
         assertThat(status(send(ana, HttpMethod.GET, classUrl + "/enrollments", null))).as("students do not see the roster").isEqualTo(403);
         assertThat(status(send(ana, HttpMethod.POST, "/api/v1/users", "{\"role\":\"ADMIN\",\"lastName\":\"X\",\"firstName\":\"Y\",\"email\":\"x@school.edu\"}")))
             .as("students cannot create accounts").isEqualTo(403);
@@ -179,8 +179,8 @@ class P1AcceptanceTest extends PostgresIntegrationTest {
         // ===== Criterion 4a: a group project (student-formed team with an invitation) =====
         MvcResult team = ok(send(noel, HttpMethod.POST, classUrl + "/projects", "{\"kind\":\"TEAM\",\"title\":\"Capstone\",\"teamName\":\"Team Noel\"}"));
         UUID teamId = id(team, "$.id");
-        String quinId = first(body(ok(send(noel, HttpMethod.GET, classUrl + "/eligible-classmates", null))), "$[?(@.firstName=='Quin')].id");
-        MvcResult invitation = ok(send(noel, HttpMethod.POST, "/api/v1/projects/" + teamId + "/invitations", "{\"studentId\":\"" + quinId + "\"}"));
+        String quinId = first(body(ok(send(noel, HttpMethod.GET, classUrl + "/eligible-participants", null))), "$[?(@.firstName=='Quin')].id");
+        MvcResult invitation = ok(send(noel, HttpMethod.POST, "/api/v1/projects/" + teamId + "/invitations", "{\"participantId\":\"" + quinId + "\"}"));
         UUID invitationId = id(invitation, "$.id");
         MvcResult joined = ok(send(quin, HttpMethod.POST, "/api/v1/invitations/" + invitationId + "/accept", null));
         assertThat((List<String>) JsonPath.read(body(joined), "$.members[*].firstName")).containsExactlyInAnyOrder("Noel", "Quin");
@@ -189,7 +189,7 @@ class P1AcceptanceTest extends PostgresIntegrationTest {
         // ===== Criterion 4b: an individual project assigned by the instructor =====
         UUID lea = jdbc.queryForObject("SELECT id FROM app_user WHERE student_number = '2025-0004'", UUID.class);
         MvcResult solo = ok(send(instructor, HttpMethod.POST, classUrl + "/projects",
-            "{\"kind\":\"INDIVIDUAL\",\"title\":\"Personal project\",\"studentId\":\"" + lea + "\"}"));
+            "{\"kind\":\"INDIVIDUAL\",\"title\":\"Personal project\",\"participantId\":\"" + lea + "\"}"));
         assertThat((List<String>) JsonPath.read(body(solo), "$.members[*].firstName")).containsExactly("Lea");
 
         // Everyone sees exactly what they should.

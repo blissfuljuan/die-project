@@ -43,18 +43,18 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
     void seed() {
         sessions.clear();
         admin = user("admin@x.edu", "ADMIN", "Admin", "Root", null);
-        i1 = user("i1@x.edu", "INSTRUCTOR", "One", "Ian", null);
-        i2 = user("i2@x.edu", "INSTRUCTOR", "Two", "Ivy", null);
-        a1 = user("a1@x.edu", "STUDENT", "Aa", "One", "S-A1");
-        a2 = user("a2@x.edu", "STUDENT", "Aa", "Two", "S-A2");
-        a3 = user("a3@x.edu", "STUDENT", "Aa", "Three", "S-A3");
-        a4 = user("a4@x.edu", "STUDENT", "Aa", "Four", "S-A4");
-        a5 = user("a5@x.edu", "STUDENT", "Aa", "Five", "S-A5");
-        b1 = user("b1@x.edu", "STUDENT", "Bb", "One", "S-B1");
-        b2 = user("b2@x.edu", "STUDENT", "Bb", "Two", "S-B2");
-        out = user("out@x.edu", "STUDENT", "Out", "Side", "S-OUT");
-        c1 = clazz("CS101", i1, "STUDENT_FORMED", 2, 3, false);
-        c2 = clazz("CS102", i2, "INSTRUCTOR_ASSIGNED", 1, 5, false);
+        i1 = user("i1@x.edu", "COORDINATOR", "One", "Ian", null);
+        i2 = user("i2@x.edu", "COORDINATOR", "Two", "Ivy", null);
+        a1 = user("a1@x.edu", "PARTICIPANT", "Aa", "One", "S-A1");
+        a2 = user("a2@x.edu", "PARTICIPANT", "Aa", "Two", "S-A2");
+        a3 = user("a3@x.edu", "PARTICIPANT", "Aa", "Three", "S-A3");
+        a4 = user("a4@x.edu", "PARTICIPANT", "Aa", "Four", "S-A4");
+        a5 = user("a5@x.edu", "PARTICIPANT", "Aa", "Five", "S-A5");
+        b1 = user("b1@x.edu", "PARTICIPANT", "Bb", "One", "S-B1");
+        b2 = user("b2@x.edu", "PARTICIPANT", "Bb", "Two", "S-B2");
+        out = user("out@x.edu", "PARTICIPANT", "Out", "Side", "S-OUT");
+        c1 = clazz("CS101", i1, "PARTICIPANT_FORMED", 2, 3, false);
+        c2 = clazz("CS102", i2, "COORDINATOR_ASSIGNED", 1, 5, false);
         for (UUID s : List.of(a1, a2, a3, a4, a5)) enroll(c1, s);
         for (UUID s : List.of(b1, b2)) enroll(c2, s);
     }
@@ -78,15 +78,15 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         return id;
     }
 
-    private void enroll(UUID classId, UUID student) {
-        jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", classId, student);
+    private void enroll(UUID workspaceId, UUID student) {
+        jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", workspaceId, student);
     }
 
     /** SQL fixture: a project whose first listed member is the representative (TEAM) or sole member (INDIVIDUAL). */
-    private UUID project(UUID classId, String kind, String title, UUID... members) {
+    private UUID project(UUID workspaceId, String kind, String title, UUID... members) {
         UUID id = jdbc.queryForObject("""
             INSERT INTO project (class_id, title, kind, team_name) VALUES (?, ?, ?, CASE WHEN ? = 'TEAM' THEN ? END) RETURNING id
-            """, UUID.class, classId, title, kind, kind, title);
+            """, UUID.class, workspaceId, title, kind, kind, title);
         for (int i = 0; i < members.length; i++) {
             String role = "TEAM".equals(kind) && i == 0 ? "REPRESENTATIVE" : "MEMBER";
             jdbc.update("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)", id, members[i], role);
@@ -136,14 +136,14 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
     }
 
     private UUID createTeam(UUID student, String title) throws Exception {
-        MvcResult r = call(student, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects",
+        MvcResult r = call(student, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects",
             "{\"kind\":\"TEAM\",\"title\":\"" + title + "\",\"teamName\":\"" + title + "\"}");
         assertThat(status(r)).as(body(r)).isEqualTo(201);
         return UUID.fromString(JsonPath.read(body(r), "$.id"));
     }
 
     private UUID invite(UUID actor, UUID projectId, UUID student) throws Exception {
-        MvcResult r = call(actor, HttpMethod.POST, "/api/v1/projects/" + projectId + "/invitations", "{\"studentId\":\"" + student + "\"}");
+        MvcResult r = call(actor, HttpMethod.POST, "/api/v1/projects/" + projectId + "/invitations", "{\"participantId\":\"" + student + "\"}");
         assertThat(status(r)).as(body(r)).isEqualTo(201);
         return UUID.fromString(JsonPath.read(body(r), "$.id"));
     }
@@ -152,7 +152,7 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void studentFormedTeamLifecycleWithInvitationsAndSizeLimits() throws Exception {
-        MvcResult created = call(a1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects",
+        MvcResult created = call(a1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects",
             "{\"kind\":\"TEAM\",\"title\":\"Capstone\",\"teamName\":\"Team Rocket\",\"description\":\"d\"}");
         assertThat(status(created)).isEqualTo(201);
         UUID team = UUID.fromString(JsonPath.read(body(created), "$.id"));
@@ -161,7 +161,7 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         assertThat((List<String>) JsonPath.read(body(created), "$.members[*].role")).containsExactly("REPRESENTATIVE");
 
         // The representative sees which classmates can still be invited: no self, nobody on a team, nobody outside the class.
-        MvcResult eligible = call(a1, HttpMethod.GET, "/api/v1/classes/" + c1 + "/eligible-classmates", null);
+        MvcResult eligible = call(a1, HttpMethod.GET, "/api/v1/workspaces/" + c1 + "/eligible-participants", null);
         assertThat((List<String>) JsonPath.read(body(eligible), "$[*].id")).containsExactlyInAnyOrder(
             a2.toString(), a3.toString(), a4.toString(), a5.toString());
         assertThat(body(eligible)).doesNotContain("S-A2").doesNotContain("studentNumber");
@@ -176,21 +176,21 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
 
         UUID inv3 = invite(a1, team, a3);                       // 2 members + 0 pending < 3
         assertThat(status(call(a1, HttpMethod.POST, "/api/v1/projects/" + team + "/invitations",
-            "{\"studentId\":\"" + a4 + "\"}"))).as("members + pending invitations reach the maximum").isEqualTo(409);
+            "{\"participantId\":\"" + a4 + "\"}"))).as("members + pending invitations reach the maximum").isEqualTo(409);
         assertThat(status(call(a3, HttpMethod.POST, "/api/v1/invitations/" + inv3 + "/accept", null))).isEqualTo(200);
         assertThat(currentMembers(team)).containsExactly(a1, a2, a3);
         assertThat(status(call(a1, HttpMethod.POST, "/api/v1/projects/" + team + "/invitations",
-            "{\"studentId\":\"" + a4 + "\"}"))).as("full team").isEqualTo(409);
+            "{\"participantId\":\"" + a4 + "\"}"))).as("full team").isEqualTo(409);
 
         // Representative hands over; the former representative loses edit rights, the new one gains them.
-        assertThat(status(call(a1, HttpMethod.PUT, "/api/v1/projects/" + team + "/representative", "{\"studentId\":\"" + a2 + "\"}"))).isEqualTo(200);
+        assertThat(status(call(a1, HttpMethod.PUT, "/api/v1/projects/" + team + "/representative", "{\"participantId\":\"" + a2 + "\"}"))).isEqualTo(200);
         assertThat(roleOf(team, a1)).isEqualTo("MEMBER");
         assertThat(roleOf(team, a2)).isEqualTo("REPRESENTATIVE");
         assertThat(status(call(a1, HttpMethod.PATCH, "/api/v1/projects/" + team,
             "{\"version\":" + version(team) + ",\"description\":\"nope\"}"))).isEqualTo(403);
         assertThat(status(call(a2, HttpMethod.PATCH, "/api/v1/projects/" + team,
             "{\"version\":" + version(team) + ",\"description\":\"yes\"}"))).isEqualTo(200);
-        assertThat(status(call(a2, HttpMethod.PUT, "/api/v1/projects/" + team + "/representative", "{\"studentId\":\"" + a4 + "\"}")))
+        assertThat(status(call(a2, HttpMethod.PUT, "/api/v1/projects/" + team + "/representative", "{\"participantId\":\"" + a4 + "\"}")))
             .as("representative must be a current member").isEqualTo(400);
 
         // Members see names but never classmates' student numbers; staff see them. History keeps role periods.
@@ -206,16 +206,16 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         UUID team = createTeam(a1, "Alpha");
         String url = "/api/v1/projects/" + team + "/invitations";
 
-        assertThat(status(call(a1, HttpMethod.POST, url, "{\"studentId\":\"" + b1 + "\"}"))).as("student of another class").isEqualTo(404);
-        assertThat(status(call(a1, HttpMethod.POST, url, "{\"studentId\":\"" + out + "\"}"))).as("not enrolled anywhere").isEqualTo(404);
-        assertThat(status(call(a1, HttpMethod.POST, url, "{\"studentId\":\"" + UUID.randomUUID() + "\"}"))).as("unknown id").isEqualTo(404);
-        assertThat(status(call(a1, HttpMethod.POST, url, "{\"studentId\":\"" + i1 + "\"}"))).as("an instructor").isEqualTo(404);
-        assertThat(status(call(a1, HttpMethod.POST, url, "{\"studentId\":\"" + a1 + "\"}"))).as("self").isEqualTo(400);
+        assertThat(status(call(a1, HttpMethod.POST, url, "{\"participantId\":\"" + b1 + "\"}"))).as("student of another class").isEqualTo(404);
+        assertThat(status(call(a1, HttpMethod.POST, url, "{\"participantId\":\"" + out + "\"}"))).as("not enrolled anywhere").isEqualTo(404);
+        assertThat(status(call(a1, HttpMethod.POST, url, "{\"participantId\":\"" + UUID.randomUUID() + "\"}"))).as("unknown id").isEqualTo(404);
+        assertThat(status(call(a1, HttpMethod.POST, url, "{\"participantId\":\"" + i1 + "\"}"))).as("an instructor").isEqualTo(404);
+        assertThat(status(call(a1, HttpMethod.POST, url, "{\"participantId\":\"" + a1 + "\"}"))).as("self").isEqualTo(400);
         UUID other = createTeam(a2, "Beta");
-        assertThat(status(call(a1, HttpMethod.POST, url, "{\"studentId\":\"" + a2 + "\"}"))).as("already on a team").isEqualTo(409);
+        assertThat(status(call(a1, HttpMethod.POST, url, "{\"participantId\":\"" + a2 + "\"}"))).as("already on a team").isEqualTo(409);
 
         UUID inv = invite(a1, team, a3);
-        assertThat(status(call(a1, HttpMethod.POST, url, "{\"studentId\":\"" + a3 + "\"}"))).as("duplicate pending").isEqualTo(409);
+        assertThat(status(call(a1, HttpMethod.POST, url, "{\"participantId\":\"" + a3 + "\"}"))).as("duplicate pending").isEqualTo(409);
 
         // Only the invitee can act on an invitation; everybody else gets the same 404 as for a missing one.
         for (UUID other3 : List.of(a4, a5, a1, i1, admin, out)) {
@@ -256,9 +256,9 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
 
         // Instructor switches the class to assigned teams: outstanding invitations stop working.
         UUID inv = invite(a1, t1, a4);
-        jdbc.update("UPDATE academic_class SET team_formation = 'INSTRUCTOR_ASSIGNED' WHERE id = ?", c1);
+        jdbc.update("UPDATE academic_class SET team_formation = 'COORDINATOR_ASSIGNED' WHERE id = ?", c1);
         assertThat(status(call(a4, HttpMethod.POST, "/api/v1/invitations/" + inv + "/accept", null))).isEqualTo(409);
-        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/projects/" + t1 + "/invitations", "{\"studentId\":\"" + a5 + "\"}"))).isEqualTo(403);
+        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/projects/" + t1 + "/invitations", "{\"participantId\":\"" + a5 + "\"}"))).isEqualTo(403);
     }
 
     // ================= creation rules =================
@@ -266,25 +266,25 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
     @Test
     void studentsCanOnlyCreateOneTeamAndOnlyWhereTheClassAllowsIt() throws Exception {
         String team = "{\"kind\":\"TEAM\",\"title\":\"T\"}";
-        assertThat(status(call(b1, HttpMethod.POST, "/api/v1/classes/" + c2 + "/projects", team))).as("assigned-team class").isEqualTo(403);
-        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", "{\"kind\":\"INDIVIDUAL\",\"title\":\"T\"}"))).as("students cannot create individual projects").isEqualTo(403);
-        assertThat(status(call(out, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", team))).as("not in the class").isEqualTo(404);
-        assertThat(status(call(b1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", team))).as("other class").isEqualTo(404);
-        assertThat(status(call(i2, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", team))).as("instructor of another class").isEqualTo(404);
-        assertThat(status(call(null, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", team))).isEqualTo(401);
-        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", "{\"kind\":\"TEAM\"}"))).as("title required").isEqualTo(400);
-        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", "{\"kind\":\"CLUB\",\"title\":\"T\"}"))).isEqualTo(400);
+        assertThat(status(call(b1, HttpMethod.POST, "/api/v1/workspaces/" + c2 + "/projects", team))).as("assigned-team class").isEqualTo(403);
+        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", "{\"kind\":\"INDIVIDUAL\",\"title\":\"T\"}"))).as("students cannot create individual projects").isEqualTo(403);
+        assertThat(status(call(out, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", team))).as("not in the class").isEqualTo(404);
+        assertThat(status(call(b1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", team))).as("other class").isEqualTo(404);
+        assertThat(status(call(i2, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", team))).as("instructor of another class").isEqualTo(404);
+        assertThat(status(call(null, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", team))).isEqualTo(401);
+        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", "{\"kind\":\"TEAM\"}"))).as("title required").isEqualTo(400);
+        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", "{\"kind\":\"CLUB\",\"title\":\"T\"}"))).isEqualTo(400);
 
         createTeam(a1, "Mine");
-        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", team))).as("second team").isEqualTo(409);
+        assertThat(status(call(a1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", team))).as("second team").isEqualTo(409);
         jdbc.update("UPDATE academic_class SET status = 'ARCHIVED' WHERE id = ?", c1);
-        assertThat(status(call(a2, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects", team))).as("archived class").isEqualTo(409);
+        assertThat(status(call(a2, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects", team))).as("archived class").isEqualTo(409);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM project", Integer.class)).isEqualTo(1);
     }
 
     @Test
     void staffAssignTeamsAndIndividualProjectsWithinTheClassPolicy() throws Exception {
-        String url = "/api/v1/classes/" + c1 + "/projects";
+        String url = "/api/v1/workspaces/" + c1 + "/projects";
         MvcResult created = call(i1, HttpMethod.POST, url,
             "{\"kind\":\"TEAM\",\"title\":\"Assigned\",\"memberIds\":[\"" + a1 + "\",\"" + a2 + "\"],\"representativeId\":\"" + a2 + "\"}");
         assertThat(status(created)).isEqualTo(201);
@@ -300,11 +300,11 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.POST, url, "{\"kind\":\"TEAM\",\"title\":\"X\",\"memberIds\":[\"" + a4 + "\",\"" + a1 + "\"]}"))).as("already on a team").isEqualTo(409);
         assertThat(status(call(i1, HttpMethod.POST, url, "{\"kind\":\"TEAM\",\"title\":\"X\",\"memberIds\":[\"" + a4 + "\",\"" + a5 + "\"],\"representativeId\":\"" + a1 + "\"}"))).as("representative not a member").isEqualTo(400);
 
-        MvcResult individual = call(i1, HttpMethod.POST, url, "{\"kind\":\"INDIVIDUAL\",\"title\":\"Solo\",\"studentId\":\"" + a4 + "\"}");
+        MvcResult individual = call(i1, HttpMethod.POST, url, "{\"kind\":\"INDIVIDUAL\",\"title\":\"Solo\",\"participantId\":\"" + a4 + "\"}");
         assertThat(status(individual)).isEqualTo(201);
         assertThat((List<String>) JsonPath.read(body(individual), "$.members[*].role")).containsExactly("MEMBER");
         assertThat((Boolean) JsonPath.read(body(individual), "$.meetsMinSize")).isTrue();
-        assertThat(status(call(i1, HttpMethod.POST, url, "{\"kind\":\"INDIVIDUAL\",\"title\":\"Solo2\",\"studentId\":\"" + a1 + "\"}"))).isEqualTo(409);
+        assertThat(status(call(i1, HttpMethod.POST, url, "{\"kind\":\"INDIVIDUAL\",\"title\":\"Solo2\",\"participantId\":\"" + a1 + "\"}"))).isEqualTo(409);
         assertThat(status(call(i1, HttpMethod.POST, url, "{\"kind\":\"INDIVIDUAL\",\"title\":\"Solo3\"}"))).isEqualTo(400);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'PROJECT_CREATED'", Integer.class)).isEqualTo(3);
     }
@@ -343,8 +343,8 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
             Integer.class, team, a2)).isEqualTo(1);
 
         // Removed students become free to join another project.
-        assertThat(status(call(i1, HttpMethod.POST, "/api/v1/classes/" + c1 + "/projects",
-            "{\"kind\":\"INDIVIDUAL\",\"title\":\"Solo\",\"studentId\":\"" + a2 + "\"}"))).isEqualTo(201);
+        assertThat(status(call(i1, HttpMethod.POST, "/api/v1/workspaces/" + c1 + "/projects",
+            "{\"kind\":\"INDIVIDUAL\",\"title\":\"Solo\",\"participantId\":\"" + a2 + "\"}"))).isEqualTo(201);
     }
 
     @Test
@@ -357,7 +357,7 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.PUT, members, "{\"version\":" + v + ",\"memberIds\":[\"" + a4 + "\"]}"))).isEqualTo(200);
         assertThat(currentMembers(solo)).containsExactly(a4);
         assertThat(status(call(a4, HttpMethod.POST, "/api/v1/projects/" + solo + "/leave", null))).isEqualTo(409);
-        assertThat(status(call(i1, HttpMethod.PUT, "/api/v1/projects/" + solo + "/representative", "{\"studentId\":\"" + a4 + "\"}"))).isEqualTo(409);
+        assertThat(status(call(i1, HttpMethod.PUT, "/api/v1/projects/" + solo + "/representative", "{\"participantId\":\"" + a4 + "\"}"))).isEqualTo(409);
         assertThat(status(call(a4, HttpMethod.PATCH, "/api/v1/projects/" + solo, "{\"version\":" + version(solo) + ",\"title\":\"x\"}")))
             .as("individual projects are managed by staff").isEqualTo(403);
     }
@@ -406,15 +406,15 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
             UUID.class, team, a4, a1);
         UUID otherTeam = project(c1, "TEAM", "Other", a5);
 
-        assertThat(status(call(i1, HttpMethod.DELETE, "/api/v1/classes/" + c1 + "/enrollments/" + a1, null))).isEqualTo(204);   // the representative
+        assertThat(status(call(i1, HttpMethod.DELETE, "/api/v1/workspaces/" + c1 + "/enrollments/" + a1, null))).isEqualTo(204);   // the representative
         assertThat(currentMembers(team)).containsExactlyInAnyOrder(a2, a3);
         assertThat(roleOf(team, a2)).isEqualTo("REPRESENTATIVE");
         assertThat(status(call(a1, HttpMethod.GET, "/api/v1/projects/" + team, null))).isEqualTo(404);
 
-        assertThat(status(call(i1, HttpMethod.DELETE, "/api/v1/classes/" + c1 + "/enrollments/" + a4, null))).isEqualTo(204);
+        assertThat(status(call(i1, HttpMethod.DELETE, "/api/v1/workspaces/" + c1 + "/enrollments/" + a4, null))).isEqualTo(204);
         assertThat(jdbc.queryForObject("SELECT status FROM team_invitation WHERE id = ?", String.class, inv)).isEqualTo("CANCELLED");
 
-        assertThat(status(call(i1, HttpMethod.DELETE, "/api/v1/classes/" + c1 + "/enrollments/" + a5, null))).isEqualTo(204);
+        assertThat(status(call(i1, HttpMethod.DELETE, "/api/v1/workspaces/" + c1 + "/enrollments/" + a5, null))).isEqualTo(204);
         assertThat(jdbc.queryForObject("SELECT status FROM project WHERE id = ?", String.class, otherTeam)).isEqualTo("ARCHIVED");
         assertThat(currentMembers(team)).containsExactlyInAnyOrder(a2, a3);
     }
@@ -423,8 +423,8 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
     void lowerTeamMaximumIsRefusedWhileATeamWouldExceedIt() throws Exception {
         project(c1, "TEAM", "Trio", a1, a2, a3);
         long classVersion = jdbc.queryForObject("SELECT version FROM academic_class WHERE id = ?", Long.class, c1);
-        assertThat(status(call(i1, HttpMethod.PATCH, "/api/v1/classes/" + c1, "{\"version\":" + classVersion + ",\"teamMaxSize\":2}"))).isEqualTo(409);
-        assertThat(status(call(i1, HttpMethod.PATCH, "/api/v1/classes/" + c1, "{\"version\":" + classVersion + ",\"teamMaxSize\":4}"))).isEqualTo(200);
+        assertThat(status(call(i1, HttpMethod.PATCH, "/api/v1/workspaces/" + c1, "{\"version\":" + classVersion + ",\"teamMaxSize\":2}"))).isEqualTo(409);
+        assertThat(status(call(i1, HttpMethod.PATCH, "/api/v1/workspaces/" + c1, "{\"version\":" + classVersion + ",\"teamMaxSize\":4}"))).isEqualTo(200);
     }
 
     // ================= negative authorization matrix =================
@@ -445,8 +445,8 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
             new Op("patch", HttpMethod.PATCH, base, "{\"version\":" + v + ",\"title\":\"HACKED\"}"),
             new Op("archive", HttpMethod.POST, base + "/archive", null),
             new Op("members", HttpMethod.PUT, base + "/members", "{\"version\":" + v + ",\"memberIds\":[\"" + a1 + "\",\"" + a5 + "\"]}"),
-            new Op("representative", HttpMethod.PUT, base + "/representative", "{\"studentId\":\"" + a2 + "\"}"),
-            new Op("invite", HttpMethod.POST, base + "/invitations", "{\"studentId\":\"" + a5 + "\"}"),
+            new Op("representative", HttpMethod.PUT, base + "/representative", "{\"participantId\":\"" + a2 + "\"}"),
+            new Op("invite", HttpMethod.POST, base + "/invitations", "{\"participantId\":\"" + a5 + "\"}"),
             new Op("cancel invitation", HttpMethod.DELETE, base + "/invitations/" + inv, null),
             new Op("history", HttpMethod.GET, base + "/membership-history", null),
             new Op("leave", HttpMethod.POST, base + "/leave", null));
@@ -493,7 +493,7 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(admin, HttpMethod.GET, base + "/membership-history", null))).isEqualTo(200);
         assertThat(status(call(a1, HttpMethod.DELETE, base + "/invitations/" + inv, null))).isEqualTo(204);
         // (members + pending invitations are capped at the class maximum, so invite after freeing the slot)
-        assertThat(status(call(a1, HttpMethod.POST, base + "/invitations", "{\"studentId\":\"" + a5 + "\"}"))).isEqualTo(201);
+        assertThat(status(call(a1, HttpMethod.POST, base + "/invitations", "{\"participantId\":\"" + a5 + "\"}"))).isEqualTo(201);
     }
 
     @Test
@@ -501,7 +501,7 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         UUID p1 = project(c1, "TEAM", "Matrix", a1, a2);
         UUID p2 = project(c1, "INDIVIDUAL", "Solo", a3);
         project(c2, "TEAM", "Foreign", b1);
-        String list = "/api/v1/classes/" + c1 + "/projects";
+        String list = "/api/v1/workspaces/" + c1 + "/projects";
 
         assertThat((List<String>) JsonPath.read(body(call(a1, HttpMethod.GET, list, null)), "$[*].id")).containsExactly(p1.toString());
         assertThat((List<String>) JsonPath.read(body(call(a3, HttpMethod.GET, list, null)), "$[*].id")).containsExactly(p2.toString());
@@ -517,12 +517,12 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         assertThat(body(call(a2, HttpMethod.GET, list, null))).doesNotContain("S-A1");
         assertThat(body(call(i1, HttpMethod.GET, list, null))).contains("S-A1");
 
-        // Classmate lookup: unavailable where the instructor assigns teams, invisible to outsiders.
-        assertThat(status(call(b1, HttpMethod.GET, "/api/v1/classes/" + c2 + "/eligible-classmates", null))).isEqualTo(403);
-        assertThat(status(call(out, HttpMethod.GET, "/api/v1/classes/" + c1 + "/eligible-classmates", null))).isEqualTo(404);
-        assertThat(status(call(b1, HttpMethod.GET, "/api/v1/classes/" + c1 + "/eligible-classmates", null))).isEqualTo(404);
-        assertThat(status(call(i1, HttpMethod.GET, "/api/v1/classes/" + c1 + "/eligible-classmates", null))).isEqualTo(200);
-        assertThat(status(call(i2, HttpMethod.GET, "/api/v1/classes/" + c1 + "/eligible-classmates", null))).isEqualTo(404);
+        // EligibleParticipant lookup: unavailable where the instructor assigns teams, invisible to outsiders.
+        assertThat(status(call(b1, HttpMethod.GET, "/api/v1/workspaces/" + c2 + "/eligible-participants", null))).isEqualTo(403);
+        assertThat(status(call(out, HttpMethod.GET, "/api/v1/workspaces/" + c1 + "/eligible-participants", null))).isEqualTo(404);
+        assertThat(status(call(b1, HttpMethod.GET, "/api/v1/workspaces/" + c1 + "/eligible-participants", null))).isEqualTo(404);
+        assertThat(status(call(i1, HttpMethod.GET, "/api/v1/workspaces/" + c1 + "/eligible-participants", null))).isEqualTo(200);
+        assertThat(status(call(i2, HttpMethod.GET, "/api/v1/workspaces/" + c1 + "/eligible-participants", null))).isEqualTo(404);
 
         // Staff have no invitations of their own.
         assertThat((List<Object>) JsonPath.read(body(call(i1, HttpMethod.GET, "/api/v1/invitations", null)), "$")).isEmpty();
@@ -531,8 +531,8 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
     @Test
     void invitationsInAssignedClassesCannotBeSentByStudents() throws Exception {
         UUID team = project(c2, "TEAM", "Assigned", b1);
-        assertThat(status(call(b1, HttpMethod.POST, "/api/v1/projects/" + team + "/invitations", "{\"studentId\":\"" + b2 + "\"}"))).isEqualTo(403);
-        assertThat(status(call(i2, HttpMethod.POST, "/api/v1/projects/" + team + "/invitations", "{\"studentId\":\"" + b2 + "\"}")))
+        assertThat(status(call(b1, HttpMethod.POST, "/api/v1/projects/" + team + "/invitations", "{\"participantId\":\"" + b2 + "\"}"))).isEqualTo(403);
+        assertThat(status(call(i2, HttpMethod.POST, "/api/v1/projects/" + team + "/invitations", "{\"participantId\":\"" + b2 + "\"}")))
             .as("staff may still invite").isEqualTo(201);
     }
 }

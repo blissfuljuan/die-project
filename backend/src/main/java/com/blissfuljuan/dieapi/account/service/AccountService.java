@@ -183,18 +183,18 @@ public class AccountService {
     }
 
     private static void requireIdentity(UserRole role, String studentNumber, String email) {
-        if (role == UserRole.STUDENT && studentNumber == null) {
-            throw ApiException.badRequest(ErrorCode.STUDENT_NUMBER_REQUIRED, "studentNumber is required for students");
+        if (role == UserRole.PARTICIPANT && studentNumber == null) {
+            throw ApiException.badRequest(ErrorCode.STUDENT_NUMBER_REQUIRED, "studentNumber is required for participants");
         }
-        if (role != UserRole.STUDENT && email == null) {
-            throw ApiException.badRequest(ErrorCode.EMAIL_REQUIRED, "email is required for instructors and administrators");
+        if (role != UserRole.PARTICIPANT && email == null) {
+            throw ApiException.badRequest(ErrorCode.EMAIL_REQUIRED, "email is required for coordinators and administrators");
         }
     }
 
     private static UserRole validRole(String role) {
         UserRole parsed = UserRole.parse(role);
         if (parsed == null) {
-            throw ApiException.badRequest(ErrorCode.INVALID_ROLE, "role must be STUDENT, INSTRUCTOR or ADMIN");
+            throw ApiException.badRequest(ErrorCode.INVALID_ROLE, "role must be PARTICIPANT, COORDINATOR or ADMIN");
         }
         return parsed;
     }

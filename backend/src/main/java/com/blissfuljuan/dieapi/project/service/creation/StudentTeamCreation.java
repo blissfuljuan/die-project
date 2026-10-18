@@ -28,21 +28,21 @@ public class StudentTeamCreation implements ProjectCreationStrategy {
 
     @Override
     public boolean supports(UserRole actor, ProjectKind kind) {
-        return actor == UserRole.STUDENT;
+        return actor == UserRole.PARTICIPANT;
     }
 
     @Override
     public UUID create(ProjectCreation c) {
-        if (c.kind() != ProjectKind.TEAM || c.cls().teamFormation() != TeamFormation.STUDENT_FORMED) {
-            throw ApiException.forbidden(ErrorCode.STUDENT_PROJECT_NOT_ALLOWED,
-                "Students can only create teams, and only in classes where students form their own teams");
+        if (c.kind() != ProjectKind.TEAM || c.cls().teamFormation() != TeamFormation.PARTICIPANT_FORMED) {
+            throw ApiException.forbidden(ErrorCode.PARTICIPANT_PROJECT_NOT_ALLOWED,
+                "Participants can only create teams, and only in workspaces where participants form their own teams");
         }
-        UUID studentId = c.actor().getId();
-        if (repo.activeProjectOf(c.classId(), studentId).isPresent()) {
-            throw ApiException.conflict(ErrorCode.ALREADY_IN_PROJECT, "You already belong to a project in this class");
+        UUID participantId = c.actor().getId();
+        if (repo.activeProjectOf(c.workspaceId(), participantId).isPresent()) {
+            throw ApiException.conflict(ErrorCode.ALREADY_IN_PROJECT, "You already belong to a project in this workspace");
         }
-        UUID projectId = repo.insert(c.classId(), c.kind(), c.title(), c.description(), c.teamName(), studentId);
-        team.add(projectId, studentId, TeamRole.REPRESENTATIVE, studentId);
+        UUID projectId = repo.insert(c.workspaceId(), c.kind(), c.title(), c.description(), c.teamName(), participantId);
+        team.add(projectId, participantId, TeamRole.REPRESENTATIVE, participantId);
         return projectId;
     }
 

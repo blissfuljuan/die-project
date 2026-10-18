@@ -62,9 +62,9 @@ public class RosterImportRepository {
     }
 
     /** Student id -> enrollment status for the class (ENROLLED / REMOVED). */
-    public Map<UUID, EnrollmentStatus> enrollmentStatuses(UUID classId) {
+    public Map<UUID, EnrollmentStatus> enrollmentStatuses(UUID workspaceId) {
         Map<UUID, EnrollmentStatus> out = new HashMap<>();
-        jdbc.sql("SELECT student_id, status FROM enrollment WHERE class_id = :c").param("c", classId)
+        jdbc.sql("SELECT student_id, status FROM enrollment WHERE class_id = :c").param("c", workspaceId)
             .query((rs, i) -> {
                 out.put(rs.getObject("student_id", UUID.class), EnrollmentStatus.valueOf(rs.getString("status")));
                 return 0;
@@ -74,12 +74,12 @@ public class RosterImportRepository {
 
     // ---- imports ----
 
-    public UUID insertImport(UUID classId, UUID uploadedBy, String fileName, String sha256) {
+    public UUID insertImport(UUID workspaceId, UUID uploadedBy, String fileName, String sha256) {
         return jdbc.sql("""
                 INSERT INTO roster_import (class_id, uploaded_by, file_name, file_sha256)
                 VALUES (:c, :u, :f, :h) RETURNING id
                 """)
-            .param("c", classId).param("u", uploadedBy).param("f", fileName).param("h", sha256)
+            .param("c", workspaceId).param("u", uploadedBy).param("f", fileName).param("h", sha256)
             .query(UUID.class).single();
     }
 
@@ -108,12 +108,12 @@ public class RosterImportRepository {
             .optional();
     }
 
-    public List<ImportHeader> listForClass(UUID classId) {
+    public List<ImportHeader> listForClass(UUID workspaceId) {
         return jdbc.sql("""
                 SELECT id, class_id, uploaded_by, file_name, status, created_at, committed_at, summary::text AS summary
                 FROM roster_import WHERE class_id = :c ORDER BY created_at DESC, id
                 """)
-            .param("c", classId)
+            .param("c", workspaceId)
             .query((rs, n) -> new ImportHeader(rs.getObject("id", UUID.class), rs.getObject("class_id", UUID.class),
                 rs.getObject("uploaded_by", UUID.class), rs.getString("file_name"), ImportStatus.valueOf(rs.getString("status")),
                 rs.getObject("created_at", OffsetDateTime.class), rs.getObject("committed_at", OffsetDateTime.class),
@@ -209,7 +209,7 @@ public class RosterImportRepository {
                                      UUID createdBy) {
         return jdbc.sql("""
                 INSERT INTO app_user (role, status, student_number, last_name, first_name, middle_name, created_by)
-                VALUES ('STUDENT', 'PENDING_ACTIVATION', :sn, :ln, :fn, :mn, :by) RETURNING id
+                VALUES ('PARTICIPANT', 'PENDING_ACTIVATION', :sn, :ln, :fn, :mn, :by) RETURNING id
                 """)
             .param("sn", studentNumber).param("ln", lastName).param("fn", firstName).param("mn", middleName)
             .param("by", createdBy).query(UUID.class).single();

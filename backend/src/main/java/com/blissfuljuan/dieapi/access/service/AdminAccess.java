@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 
-/** Administrators see and manage everything. */
+/** Administrators see and administer every workspace and project, but have no access to their content (ADR 0002). */
 @Component
 class AdminAccess implements RoleAccess {
 
@@ -21,9 +21,9 @@ class AdminAccess implements RoleAccess {
 
     @Override public UserRole role() { return UserRole.ADMIN; }
 
-    @Override public ClassRole classRole(UUID userId, UUID classId) { return ClassRole.ADMIN; }
+    @Override public ClassRole classRole(UUID userId, UUID workspaceId) { return ClassRole.ADMIN; }
 
-    @Override public ProjectRole projectRole(UUID userId, UUID projectId) { return ProjectRole.STAFF; }
+    @Override public ProjectRole projectRole(UUID userId, UUID projectId) { return ProjectRole.ADMIN; }
 
     @Override public SqlScope visibleClasses(UUID userId) { return repo.allRows(); }
 

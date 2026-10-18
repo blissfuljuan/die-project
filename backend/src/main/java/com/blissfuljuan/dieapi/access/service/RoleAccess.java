@@ -16,7 +16,7 @@ interface RoleAccess {
     UserRole role();
 
     /** What this user is to the class (the class is known to exist). */
-    ClassRole classRole(UUID userId, UUID classId);
+    ClassRole classRole(UUID userId, UUID workspaceId);
 
     /** What this user is to the project (the project is known to exist). */
     ProjectRole projectRole(UUID userId, UUID projectId);
