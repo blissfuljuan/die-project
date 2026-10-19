@@ -1,5 +1,6 @@
 package com.blissfuljuan.dieapi.academic.controller;
 
+import com.blissfuljuan.dieapi.academic.model.AddCoordinator;
 import com.blissfuljuan.dieapi.academic.model.CreateClass;
 import com.blissfuljuan.dieapi.academic.model.EnrollStudent;
 import com.blissfuljuan.dieapi.academic.model.UpdateClass;
@@ -8,6 +9,7 @@ import com.blissfuljuan.dieapi.academic.service.ClassInstructorService;
 import com.blissfuljuan.dieapi.academic.service.ClassService;
 import com.blissfuljuan.dieapi.academic.view.ClassPage;
 import com.blissfuljuan.dieapi.academic.view.ClassView;
+import com.blissfuljuan.dieapi.academic.view.CoordinatorEntry;
 import com.blissfuljuan.dieapi.academic.view.EnrollmentView;
 import com.blissfuljuan.dieapi.academic.view.TemporaryCredentialView;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
@@ -37,7 +39,7 @@ public class ClassController {
             @Size(max = 100) String academicYear, @Size(max = 100) String semester,
             @Size(max = 100) String subjectCode, @Size(max = 100) String subjectName,
             @Size(max = 100) String section, String teamFormation, Integer teamMinSize, Integer teamMaxSize,
-            Boolean participantsMayChangeTeams, List<UUID> coordinatorIds) {}
+            Boolean participantsMayChangeTeams, List<UUID> coordinatorIds, UUID ownerId) {}
 
     public record UpdateClassRequest(
         @NotNull Long version,
@@ -46,7 +48,12 @@ public class ClassController {
         @Size(max = 100) String section, String teamFormation, Integer teamMinSize, Integer teamMaxSize,
         Boolean participantsMayChangeTeams) {}
 
-    public record InstructorsRequest(@NotNull List<UUID> coordinatorIds) {}
+    /** capabilities omitted = the defaults (MANAGE_ROSTER, MANAGE_PROJECTS). */
+    public record AddCoordinatorRequest(@NotNull UUID userId, List<String> capabilities) {}
+
+    public record CapabilitiesRequest(@NotNull List<String> capabilities) {}
+
+    public record TransferOwnerRequest(@NotNull UUID userId) {}
 
     /** lastName is required for coordinators enrolling by studentNumber (admins may omit it). */
     public record EnrollRequest(UUID participantId, @Size(max = 64) String studentNumber, @Size(max = 100) String lastName,
@@ -77,7 +84,7 @@ public class ClassController {
                                             @Valid @RequestBody CreateClassRequest body) {
         ClassView created = classes.create(user, new CreateClass(body.academicYear(), body.semester(),
             body.subjectCode(), body.subjectName(), body.section(), body.teamFormation(), body.teamMinSize(),
-            body.teamMaxSize(), body.participantsMayChangeTeams(), body.coordinatorIds()));
+            body.teamMaxSize(), body.participantsMayChangeTeams(), body.coordinatorIds(), body.ownerId()));
         return ResponseEntity.created(URI.create("/api/v1/workspaces/" + created.id())).body(created);
     }
 
@@ -105,13 +112,40 @@ public class ClassController {
         return classes.unarchive(user, id);
     }
 
-    /** Changing who teaches a class is an administrative act: peers must not be able to remove each other. */
-    @PutMapping("/{id}/coordinators")
-    @PreAuthorize("hasRole('ADMIN')")
+    /** Assigned coordinators with their effective capabilities; coordinators of the workspace and administrators only. */
+    @GetMapping("/{id}/coordinators")
+    public List<CoordinatorEntry> listCoordinators(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id) {
+        return coordinators.list(user, id);
+    }
+
+    /** Owner, a coordinator with MANAGE_COORDINATORS, or an administrator; the target must be an active coordinator account. */
+    @PostMapping("/{id}/coordinators")
+    public ResponseEntity<CoordinatorEntry> addCoordinator(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
+                                                           @Valid @RequestBody AddCoordinatorRequest body) {
+        CoordinatorEntry added = coordinators.add(user, id, new AddCoordinator(body.userId(), body.capabilities()));
+        return ResponseEntity.created(URI.create("/api/v1/workspaces/" + id + "/coordinators/" + added.userId())).body(added);
+    }
+
+    /** The Owner's capabilities cannot be changed (409). */
+    @PatchMapping("/{id}/coordinators/{userId}")
+    public CoordinatorEntry setCapabilities(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
+                                            @PathVariable UUID userId, @Valid @RequestBody CapabilitiesRequest body) {
+        return coordinators.setCapabilities(user, id, userId, body.capabilities());
+    }
+
+    /** The Owner cannot be removed (409): transfer ownership first. */
+    @DeleteMapping("/{id}/coordinators/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void setCoordinators(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
-                               @Valid @RequestBody InstructorsRequest body) {
-        coordinators.setCoordinators(user, id, body.coordinatorIds());
+    public void removeCoordinator(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id, @PathVariable UUID userId) {
+        coordinators.remove(user, id, userId);
+    }
+
+    /** Ownership transfer: current Owner or an administrator; the new Owner must already be an assigned coordinator. */
+    @PutMapping("/{id}/owner")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void transferOwner(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
+                              @Valid @RequestBody TransferOwnerRequest body) {
+        coordinators.transferOwner(user, id, body.userId());
     }
 
     @GetMapping("/{id}/enrollments")

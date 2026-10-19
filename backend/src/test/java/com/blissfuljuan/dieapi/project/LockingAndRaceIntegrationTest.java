@@ -48,10 +48,10 @@ class LockingAndRaceIntegrationTest extends PostgresIntegrationTest {
         member = user("member@x.edu", "PARTICIPANT", "S-2");
         invitee = user("invitee@x.edu", "PARTICIPANT", "S-3");
         workspaceId = jdbc.queryForObject("""
-            INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section, team_formation, team_min_size, team_max_size)
-            VALUES ('2025-2026', '1st', 'CS1', 'S', 'A', 'PARTICIPANT_FORMED', 2, 4) RETURNING id
-            """, UUID.class);
-        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", workspaceId, instructor);
+            WITH c AS (INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section, team_formation, team_min_size, team_max_size, owner_id)
+            VALUES ('2025-2026', '1st', 'CS1', 'S', 'A', 'PARTICIPANT_FORMED', 2, 4, ?) RETURNING id)
+            INSERT INTO class_instructor (class_id, user_id) SELECT id, ? FROM c RETURNING class_id
+            """, UUID.class, instructor, instructor);
         for (UUID s : new UUID[] {rep, member, invitee}) jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", workspaceId, s);
         projectId = jdbc.queryForObject("INSERT INTO project (class_id, title, kind, team_name) VALUES (?, 'Team', 'TEAM', 'Team') RETURNING id", UUID.class, workspaceId);
         jdbc.update("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'REPRESENTATIVE')", projectId, rep);

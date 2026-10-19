@@ -1,6 +1,7 @@
 package com.blissfuljuan.dieapi.roster.service;
 
 import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
+import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.account.service.CredentialHasher;
 import com.blissfuljuan.dieapi.account.service.TempCredentialService;
@@ -75,7 +76,7 @@ public class RosterImportService {
 
     @Transactional
     public ImportView upload(AppUserDetails user, UUID workspaceId, String rawFileName, byte[] bytes) {
-        policy.requireClassManage(user, workspaceId);
+        policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
 
         // Parse (CPU/memory heavy, no database) before taking the class lock, so a slow or hostile file
         // cannot block enrollment and team changes for the whole class.

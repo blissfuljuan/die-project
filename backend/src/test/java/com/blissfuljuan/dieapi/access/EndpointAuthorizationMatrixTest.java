@@ -55,6 +55,8 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         ROLE_STAFF,      // @PreAuthorize hasAnyRole('ADMIN','COORDINATOR')
         CLASS_VIEW,      // AccessPolicy.requireClassView
         CLASS_MANAGE,    // AccessPolicy.requireClassManage
+        COORDINATORS_MANAGE, // AccessPolicy.requireWorkspaceCapability(MANAGE_COORDINATORS): Owner, delegated coordinators, admins
+        OWNER,           // AccessPolicy.requireWorkspaceOwner: the Owner or an administrator (a plain coordinator gets 403)
         IMPORT,          // roster import: staff of its class only, everyone else 404
         PROJECT_VIEW,    // AccessPolicy.requireProjectView
         PROJECT_EDIT,    // AccessPolicy.requireProjectEdit
@@ -75,9 +77,9 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
     @Autowired @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping handlerMapping;
 
     // actors
-    UUID admin, iA, iB, sR, sM, sC, sI, sB, sOut;
+    UUID admin, iA, iB, iD, sR, sM, sC, sI, sB, sOut;
     // resources
-    UUID classA, classB, projectA, importA, invitationA;
+    UUID classA, classB, projectA, importA, invitationA, testJobA;
     final Map<UUID, Cookie> sessions = new HashMap<>();
     final Map<UUID, String> names = new HashMap<>();
 
@@ -87,6 +89,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         admin = user("admin", "ADMIN", null);
         iA = user("iA", "COORDINATOR", null);
         iB = user("iB", "COORDINATOR", null);
+        iD = user("iD", "COORDINATOR", null); // second coordinator of class A: NOT the Owner, default capabilities only
         sR = user("sR", "PARTICIPANT", "S-R");
         sM = user("sM", "PARTICIPANT", "S-M");
         sC = user("sC", "PARTICIPANT", "S-C");
@@ -95,6 +98,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         sOut = user("sOut", "PARTICIPANT", "S-OUT");
         classA = clazz("CSA", iA);
         classB = clazz("CSB", iB);
+        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", classA, iD);
         for (UUID s : List.of(sR, sM, sC, sI)) jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", classA, s);
         jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", classB, sB);
         projectA = jdbc.queryForObject("INSERT INTO project (class_id, title, kind, team_name) VALUES (?, 'Team A', 'TEAM', 'Team A') RETURNING id", UUID.class, classA);
@@ -102,6 +106,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         jdbc.update("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'MEMBER')", projectA, sM);
         invitationA = jdbc.queryForObject("INSERT INTO team_invitation (project_id, invited_user_id, invited_by, expires_at) VALUES (?, ?, ?, now() + interval '1 day') RETURNING id",
             UUID.class, projectA, sI, sR);
+        testJobA = jdbc.queryForObject("INSERT INTO test_job (requested_by, correlation_id) VALUES (?, 'fixture-corr-1') RETURNING id", UUID.class, admin);
         importA = jdbc.queryForObject("INSERT INTO roster_import (class_id, uploaded_by, file_name, file_sha256) VALUES (?, ?, 'r.csv', 'x') RETURNING id", UUID.class, classA, iA);
         jdbc.update("""
             INSERT INTO roster_import_row (import_id, row_number, student_number, last_name, first_name, action)
@@ -148,12 +153,17 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         // --- classes and enrollment
         m.add(ep("GET", "/api/v1/workspaces", Rule.SELF, "/api/v1/workspaces", none));
         m.add(ep("POST", "/api/v1/workspaces", Rule.ROLE_STAFF, "/api/v1/workspaces",
-            () -> "{\"academicYear\":\"2030\",\"semester\":\"1st\",\"subjectCode\":\"NEW1\",\"subjectName\":\"New\",\"section\":\"A\",\"coordinatorIds\":[\"" + iA + "\"]}"));
+            () -> "{\"academicYear\":\"2030\",\"semester\":\"1st\",\"subjectCode\":\"NEW1\",\"subjectName\":\"New\",\"section\":\"A\",\"ownerId\":\"" + iA + "\"}"));
         m.add(ep("GET", "/api/v1/workspaces/{id}", Rule.CLASS_VIEW, a, none));
         m.add(ep("PATCH", "/api/v1/workspaces/{id}", Rule.CLASS_MANAGE, a, () -> "{\"version\":" + classVersion() + ",\"section\":\"Z\"}"));
         m.add(ep("POST", "/api/v1/workspaces/{id}/archive", Rule.CLASS_MANAGE, a + "/archive", none));
         m.add(ep("POST", "/api/v1/workspaces/{id}/unarchive", Rule.ADMIN, a + "/unarchive", none));
-        m.add(ep("PUT", "/api/v1/workspaces/{id}/coordinators", Rule.ADMIN, a + "/coordinators", () -> "{\"coordinatorIds\":[\"" + iA + "\"]}"));
+        m.add(ep("GET", "/api/v1/workspaces/{id}/coordinators", Rule.CLASS_MANAGE, a + "/coordinators", none));
+        m.add(ep("POST", "/api/v1/workspaces/{id}/coordinators", Rule.COORDINATORS_MANAGE, a + "/coordinators", () -> "{\"userId\":\"" + iB + "\"}"));
+        m.add(ep("PATCH", "/api/v1/workspaces/{id}/coordinators/{userId}", Rule.COORDINATORS_MANAGE, a + "/coordinators/" + iD,
+            () -> "{\"capabilities\":[\"MANAGE_ROSTER\"]}"));
+        m.add(ep("DELETE", "/api/v1/workspaces/{id}/coordinators/{userId}", Rule.COORDINATORS_MANAGE, a + "/coordinators/" + iD, none));
+        m.add(ep("PUT", "/api/v1/workspaces/{id}/owner", Rule.OWNER, a + "/owner", () -> "{\"userId\":\"" + iD + "\"}"));
         m.add(ep("GET", "/api/v1/workspaces/{id}/enrollments", Rule.CLASS_MANAGE, a + "/enrollments", none));
         m.add(ep("POST", "/api/v1/workspaces/{id}/enrollments", Rule.CLASS_MANAGE, a + "/enrollments", () -> "{\"studentNumber\":\"S-OUT\"}"));
         m.add(ep("DELETE", "/api/v1/workspaces/{id}/enrollments/{participantId}", Rule.CLASS_MANAGE, a + "/enrollments/" + sC, none));
@@ -186,6 +196,11 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         m.add(ep("GET", "/api/v1/invitations", Rule.SELF, "/api/v1/invitations", none));
         m.add(ep("POST", "/api/v1/invitations/{id}/accept", Rule.INVITEE, "/api/v1/invitations/" + invitationA + "/accept", none));
         m.add(ep("POST", "/api/v1/invitations/{id}/decline", Rule.INVITEE, "/api/v1/invitations/" + invitationA + "/decline", none));
+
+        // --- operations: infrastructure smoke test of the async backbone (admin only, not project content)
+        m.add(ep("POST", "/api/v1/ops/test-jobs", Rule.ADMIN, "/api/v1/ops/test-jobs", () -> "{\"note\":\"matrix\"}"));
+        m.add(ep("GET", "/api/v1/ops/test-jobs/{id}", Rule.ADMIN, "/api/v1/ops/test-jobs/" + testJobA, none));
+        m.add(ep("GET", "/api/v1/ops/health", Rule.ADMIN, "/api/v1/ops/health", none));
         return m;
     }
 
@@ -204,6 +219,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
             case ROLE_STAFF -> forbid(d, 403, sR, sC, sB, sOut);
             case CLASS_VIEW -> forbid(d, 404, iB, sB, sOut);
             case CLASS_MANAGE -> { forbid(d, 404, iB, sB, sOut); forbid(d, 403, sR, sM, sC, sI); }
+            case COORDINATORS_MANAGE, OWNER -> { forbid(d, 404, iB, sB, sOut); forbid(d, 403, sR, sM, sC, sI, iD); }
             case IMPORT -> forbid(d, 404, iB, sB, sOut, sR, sM, sC, sI);
             case PROJECT_VIEW -> forbid(d, 404, iB, sB, sOut, sC, sI);
             case PROJECT_EDIT -> { forbid(d, 404, iB, sB, sOut, sC, sI); forbid(d, 403, sM); }
@@ -223,7 +239,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
     private UUID allowed(Rule rule) {
         return switch (rule) {
             case ADMIN -> admin;
-            case ROLE_STAFF, CLASS_MANAGE, IMPORT, PROJECT_STAFF -> iA;
+            case ROLE_STAFF, CLASS_MANAGE, COORDINATORS_MANAGE, OWNER, IMPORT, PROJECT_STAFF -> iA;
             case CLASS_VIEW -> sR;
             case PROJECT_VIEW, PROJECT_MEMBER -> sM;
             case PROJECT_EDIT -> sR;
@@ -380,26 +396,28 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
 
     private UUID clazz(String code, UUID instructor) {
         UUID id = jdbc.queryForObject("""
-            INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section, team_formation, team_min_size, team_max_size)
-            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', 'PARTICIPANT_FORMED', 2, 4) RETURNING id
-            """, UUID.class, code);
-        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", id, instructor);
+            WITH c AS (INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section, team_formation, team_min_size, team_max_size, owner_id)
+            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', 'PARTICIPANT_FORMED', 2, 4, ?) RETURNING id)
+            INSERT INTO class_instructor (class_id, user_id) SELECT id, ? FROM c RETURNING class_id
+            """, UUID.class, code, instructor, instructor);
         return id;
     }
 
     /** Everything a mutating endpoint could touch, as one comparable string. */
     private String fingerprint() {
         List<String> parts = new ArrayList<>();
-        parts.add(jdbc.queryForList("SELECT id || ':' || version || ':' || status || ':' || section FROM academic_class ORDER BY id", String.class).toString());
+        parts.add(jdbc.queryForList("SELECT id || ':' || version || ':' || status || ':' || section || ':' || owner_id FROM academic_class ORDER BY id", String.class).toString());
         parts.add(jdbc.queryForList("SELECT id || ':' || version || ':' || status || ':' || title FROM project ORDER BY id", String.class).toString());
         parts.add(jdbc.queryForList("SELECT project_id || ':' || user_id || ':' || role || ':' || (left_at IS NULL) FROM project_member ORDER BY project_id, user_id, role", String.class).toString());
         parts.add(jdbc.queryForList("SELECT class_id || ':' || student_id || ':' || status FROM enrollment ORDER BY class_id, student_id", String.class).toString());
-        parts.add(jdbc.queryForList("SELECT class_id || ':' || user_id FROM class_instructor ORDER BY class_id, user_id", String.class).toString());
+        parts.add(jdbc.queryForList("SELECT class_id || ':' || user_id || ':' || array_to_string(capabilities, ',') FROM class_instructor ORDER BY class_id, user_id", String.class).toString());
         parts.add(jdbc.queryForList("SELECT id || ':' || status FROM team_invitation ORDER BY id", String.class).toString());
         parts.add(jdbc.queryForList("SELECT id || ':' || status FROM roster_import ORDER BY id", String.class).toString());
         parts.add(jdbc.queryForList("SELECT import_id || ':' || row_number || ':' || coalesce(resolution, '-') FROM roster_import_row ORDER BY import_id, row_number", String.class).toString());
         parts.add(jdbc.queryForList("SELECT id || ':' || role || ':' || status || ':' || version FROM app_user ORDER BY id", String.class).toString());
         parts.add(String.valueOf(jdbc.queryForObject("SELECT count(*) FROM temp_credential", Integer.class)));
+        parts.add(jdbc.queryForList("SELECT id || ':' || state FROM test_job ORDER BY id", String.class).toString());
+        parts.add(String.valueOf(jdbc.queryForObject("SELECT count(*) FROM outbox_event", Integer.class)));
         parts.add(String.valueOf(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action NOT IN ('LOGIN_SUCCEEDED', 'LOGIN_FAILED')", Integer.class)));
         return String.join("\n", parts);
     }

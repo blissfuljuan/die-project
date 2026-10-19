@@ -11,7 +11,13 @@ export const okStatus = {
   time: '2026-10-18T12:00:00Z',
 }
 
-export const handlers = [http.get(STATUS_URL, () => HttpResponse.json(okStatus))]
+export const API = '*/api/v1'
+
+export const handlers = [
+  http.get(STATUS_URL, () => HttpResponse.json(okStatus)),
+  // A token in the body is enough for the client (jsdom does not store Set-Cookie from MSW responses).
+  http.get(`${API}/auth/csrf`, () => HttpResponse.json({ headerName: 'X-XSRF-TOKEN', token: 'test-csrf' })),
+]
 
 export const server = setupServer(...handlers)
 

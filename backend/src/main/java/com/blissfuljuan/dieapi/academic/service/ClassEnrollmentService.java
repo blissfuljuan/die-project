@@ -6,6 +6,7 @@ import com.blissfuljuan.dieapi.academic.model.StudentRef;
 import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
 import com.blissfuljuan.dieapi.academic.view.EnrollmentView;
 import com.blissfuljuan.dieapi.academic.view.TemporaryCredentialView;
+import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.account.model.AccountStatus;
 import com.blissfuljuan.dieapi.account.model.UserRole;
@@ -54,14 +55,14 @@ public class ClassEnrollmentService {
 
     @Transactional(readOnly = true)
     public List<EnrollmentView> roster(AppUserDetails user, UUID workspaceId, boolean includeRemoved) {
-        policy.requireClassManage(user, workspaceId);
+        policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
         return repo.enrollments(workspaceId, includeRemoved);
     }
 
     @Transactional
     public void enroll(AppUserDetails user, UUID workspaceId, EnrollStudent req) {
-        policy.requireClassManage(user, workspaceId);
-        locks.lockWritable(workspaceId);
+        policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
+        locks.lockWritable(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
         if ((req.participantId() == null) == (req.studentNumber() == null || req.studentNumber().isBlank())) {
             throw ApiException.badRequest(ErrorCode.INVALID_ENROLLMENT_TARGET, "Provide exactly one of participantId or studentNumber");
         }
@@ -96,8 +97,8 @@ public class ClassEnrollmentService {
      */
     @Transactional
     public TemporaryCredentialView reissueTemporaryCredential(AppUserDetails user, UUID workspaceId, UUID participantId) {
-        policy.requireClassManage(user, workspaceId);
-        locks.lockWritable(workspaceId);
+        policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
+        locks.lockWritable(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
         var enrollment = repo.enrollmentStatus(workspaceId, participantId);
         var student = repo.findStudentById(participantId);
         if (enrollment.isEmpty() || enrollment.get() != EnrollmentStatus.ENROLLED || student.isEmpty()) {
@@ -115,8 +116,8 @@ public class ClassEnrollmentService {
 
     @Transactional
     public void unenroll(AppUserDetails user, UUID workspaceId, UUID participantId) {
-        policy.requireClassManage(user, workspaceId);
-        locks.lockWritable(workspaceId);
+        policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
+        locks.lockWritable(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
         var existing = repo.enrollmentStatus(workspaceId, participantId);
         if (existing.isEmpty() || existing.get() != EnrollmentStatus.ENROLLED) {
             throw ApiException.notFound(ErrorCode.ENROLLMENT_NOT_FOUND, "Enrollment not found");

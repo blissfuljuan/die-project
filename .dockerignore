@@ -1,0 +1,16 @@
+# Applies to builds whose context is the repository root (infra/render/*.Dockerfile on Render).
+.git
+.github
+.claude
+.data
+.env
+**/.env
+**/node_modules
+**/target
+**/build
+**/dist
+**/__pycache__
+**/*.egg-info
+frontend/playwright-report
+frontend/test-results
+docs

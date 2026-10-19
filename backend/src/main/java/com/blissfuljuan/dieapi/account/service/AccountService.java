@@ -6,6 +6,7 @@ import com.blissfuljuan.dieapi.account.model.LockedAccount;
 import com.blissfuljuan.dieapi.account.model.UpdateUser;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.account.repository.AccountRepository;
+import com.blissfuljuan.dieapi.account.service.port.WorkspaceOwnership;
 import com.blissfuljuan.dieapi.account.view.AccountChange;
 import com.blissfuljuan.dieapi.account.view.UserPage;
 import com.blissfuljuan.dieapi.account.view.UserView;
@@ -32,13 +33,16 @@ public class AccountService {
     private final TempCredentialService credentials;
     private final SessionRevocationService sessions;
     private final ApplicationEventPublisher events;
+    private final WorkspaceOwnership ownership;
 
     public AccountService(AccountRepository repo, TempCredentialService credentials,
-                          SessionRevocationService sessions, ApplicationEventPublisher events) {
+                          SessionRevocationService sessions, ApplicationEventPublisher events,
+                          WorkspaceOwnership ownership) {
         this.repo = repo;
         this.credentials = credentials;
         this.sessions = sessions;
         this.events = events;
+        this.ownership = ownership;
     }
 
     @Transactional
@@ -87,6 +91,9 @@ public class AccountService {
             }
         }
         requireIdentity(role, studentNumber, email);
+        if (roleChanged) {
+            requireNoOwnedWorkspaces(id); // a coordinator who owns an active workspace cannot be re-roled
+        }
 
         List<String> changed = new ArrayList<>();
         if (roleChanged) changed.add("role");
@@ -111,6 +118,7 @@ public class AccountService {
         forbidSelf(id, actor, "deactivate");
         LockedAccount cur = lock(id);
         if (cur.status() != AccountStatus.DEACTIVATED) {
+            requireNoOwnedWorkspaces(id); // an active workspace must never be left without a usable Owner
             repo.setStatus(id, AccountStatus.DEACTIVATED);
             credentials.invalidateActive(id, "LOCKED");
             sessions.revokeAllAfterCommit(id);
@@ -174,6 +182,18 @@ public class AccountService {
 
     private LockedAccount lock(UUID id) {
         return repo.lock(id).orElseThrow(() -> ApiException.notFound(ErrorCode.USER_NOT_FOUND, "User not found"));
+    }
+
+    /**
+     * Refuses when the (already locked) account is the Owner of active workspaces. Reports only how many need a
+     * transfer, never their names or ids; an administrator finds them through the workspace list.
+     */
+    private void requireNoOwnedWorkspaces(UUID id) {
+        int owned = ownership.activeWorkspacesOwnedBy(id);
+        if (owned > 0) {
+            throw ApiException.conflict(ErrorCode.WORKSPACE_OWNER_TRANSFER_REQUIRED, "This account is the Owner of " + owned
+                + " active workspace" + (owned == 1 ? "" : "s") + ". Transfer ownership (or archive the workspace) first.");
+        }
     }
 
     private static void forbidSelf(UUID id, UUID actor, String verb) {

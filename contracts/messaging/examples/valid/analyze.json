@@ -1,0 +1,12 @@
+{
+  "envelopeVersion": 1,
+  "messageId": "a1b2c3d4-0000-4000-8000-000000000001",
+  "correlationId": "req-20261018-0001",
+  "type": "test.analyze",
+  "createdAt": "2026-10-18T09:30:00.123Z",
+  "attempt": 1,
+  "payload": {
+    "testJobId": "3f2b8c1e-5d4a-4e7b-9a60-1c2d3e4f5a6b",
+    "note": "hello"
+  }
+}

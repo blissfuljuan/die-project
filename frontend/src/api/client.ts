@@ -17,6 +17,8 @@ export interface RequestOptions {
   timeoutMs?: number
   /** Optional runtime validation of the JSON body (e.g. `schema.parse`). */
   parse?: (data: unknown) => unknown
+  /** Internal: set after the single CSRF-token retry. */
+  csrfRetried?: boolean
 }
 
 type VerbOptions = Omit<RequestOptions, 'method' | 'body'>
@@ -81,7 +83,18 @@ export class ApiClient {
       headers['Content-Type'] ??= 'application/json'
     }
 
-    const response = await this.send(this.url(path), { method, headers, body }, options)
+    let response = await this.send(this.url(path), { method, headers, body }, options)
+
+    // A stale or rotated CSRF token (e.g. after sign-in or sign-out): fetch a fresh one and retry once.
+    if (response.status === 403 && isMutating(method) && !options.csrfRetried) {
+      const problem = await toApiError(response.clone())
+      if (problem.code === 'CSRF_TOKEN_INVALID') {
+        const fresh = await this.request<{ token?: string }>(CSRF_ENDPOINT, { method: 'GET', signal: options.signal })
+        const token = this.readCsrf() ?? fresh?.token
+        if (token) headers[CSRF_HEADER] = token
+        response = await this.send(this.url(path), { method, headers, body }, { ...options, csrfRetried: true })
+      }
+    }
 
     if (!response.ok) throw await toApiError(response)
     if (response.status === 204) return undefined as T

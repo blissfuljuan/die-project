@@ -1,12 +1,21 @@
 package com.blissfuljuan.dieapi.access.repository;
 
+import com.blissfuljuan.dieapi.access.model.CoordinatorGrant;
 import com.blissfuljuan.dieapi.access.model.SqlScope;
 import com.blissfuljuan.dieapi.access.model.ProjectRole;
+import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -66,6 +75,49 @@ public class AccessRepository {
             case "MEMBER" -> ProjectRole.MEMBER;
             default -> throw new IllegalArgumentException("Unknown team role " + stored);
         };
+    }
+
+    /** The workspace a project belongs to. */
+    public Optional<UUID> workspaceOfProject(UUID projectId) {
+        return jdbc.sql("SELECT class_id FROM project WHERE id = :p").param("p", projectId).query(UUID.class).optional();
+    }
+
+    /** What the user holds as an assigned coordinator of the workspace (Owner flag + stored capabilities), if assigned. */
+    public Optional<CoordinatorGrant> findGrant(UUID workspaceId, UUID userId) {
+        return jdbc.sql("""
+            SELECT (c.owner_id = ci.user_id) AS is_owner, ci.capabilities
+            FROM class_instructor ci JOIN academic_class c ON c.id = ci.class_id
+            WHERE ci.class_id = :c AND ci.user_id = :u
+            """).param("c", workspaceId).param("u", userId).query((rs, n) -> grant(rs)).optional();
+    }
+
+    /** The user's grants in several workspaces at once (only those where the user is an assigned coordinator). */
+    public Map<UUID, CoordinatorGrant> grantsOf(UUID userId, Collection<UUID> workspaceIds) {
+        Map<UUID, CoordinatorGrant> result = new HashMap<>();
+        if (workspaceIds.isEmpty()) {
+            return result;
+        }
+        jdbc.sql("""
+            SELECT ci.class_id, (c.owner_id = ci.user_id) AS is_owner, ci.capabilities
+            FROM class_instructor ci JOIN academic_class c ON c.id = ci.class_id
+            WHERE ci.user_id = :u AND ci.class_id IN (:ids)
+            """).param("u", userId).param("ids", workspaceIds)
+            .query((rs, n) -> {
+                result.put(rs.getObject("class_id", UUID.class), grant(rs));
+                return null;
+            }).list();
+        return result;
+    }
+
+    private static CoordinatorGrant grant(ResultSet rs) throws SQLException {
+        Set<WorkspaceCapability> stored = EnumSet.noneOf(WorkspaceCapability.class);
+        for (String name : Arrays.asList((String[]) rs.getArray("capabilities").getArray())) {
+            WorkspaceCapability capability = WorkspaceCapability.parse(name);
+            if (capability != null) {
+                stored.add(capability);
+            }
+        }
+        return new CoordinatorGrant(rs.getBoolean("is_owner"), stored);
     }
 
     // ---- list scopes (class listings use alias c, project listings alias p) ----

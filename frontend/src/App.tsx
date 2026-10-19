@@ -1,16 +1,16 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Route, Routes } from 'react-router-dom'
-import { HomePage } from '@/pages/HomePage'
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
+import { createQueryClient } from '@/lib/queryClient'
+import { AppRoutes } from '@/routes/AppRoutes'
 
 export function App() {
-  const [queryClient] = useState(() => new QueryClient())
+  const [queryClient] = useState(createQueryClient)
   return (
-    <QueryClientProvider client={queryClient}>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="*" element={<HomePage />} />
-      </Routes>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AppRoutes />
+      </QueryClientProvider>
+    </ErrorBoundary>
   )
 }

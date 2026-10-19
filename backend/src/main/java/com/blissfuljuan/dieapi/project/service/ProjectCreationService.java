@@ -1,5 +1,6 @@
 package com.blissfuljuan.dieapi.project.service;
 
+import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
@@ -50,7 +51,7 @@ public class ProjectCreationService {
         if (user.role() == UserRole.PARTICIPANT) {
             policy.requireClassView(user, workspaceId);
         } else {
-            policy.requireClassManage(user, workspaceId);
+            policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_PROJECTS);
         }
         var cls = mutation.lockWritableClass(workspaceId);
 

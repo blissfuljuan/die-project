@@ -22,10 +22,22 @@ public class PasswordController {
     public record ResetRequest(@NotBlank @Email @Size(max = 254) String email) {}
 
     public record ResetConfirmRequest(@NotBlank @Size(max = 128) String token,
-                                      @NotBlank @Size(max = 128) String newPassword) {}
+                                      @NotBlank @Size(max = 128) String newPassword) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "ResetConfirmRequest[redacted]";
+        }
+    }
 
     public record ChangeRequest(@NotBlank @Size(max = 128) String currentPassword,
-                                @NotBlank @Size(max = 128) String newPassword) {}
+                                @NotBlank @Size(max = 128) String newPassword) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "ChangeRequest[redacted]";
+        }
+    }
 
     private final PasswordService passwords;
 

@@ -27,7 +27,13 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     public record LoginRequest(@NotBlank @Size(max = 254) String email,
-                               @NotBlank @Size(max = 128) String password) {}
+                               @NotBlank @Size(max = 128) String password) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "LoginRequest[redacted]";
+        }
+    }
 
     private final SecurityContextHolderStrategy contextStrategy = SecurityContextHolder.getContextHolderStrategy();
     private final SecurityContextRepository contextRepository = new HttpSessionSecurityContextRepository();

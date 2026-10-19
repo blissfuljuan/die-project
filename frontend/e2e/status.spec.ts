@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 // Requires the real API at http://localhost:8080 (the Vite dev server proxies /api to it).
 
 test('shows the connected state against the real backend', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/status')
   await expect(page.getByRole('heading', { name: 'Connection status' })).toBeVisible()
   await expect(page.getByText('Connected to the DIE server.')).toBeVisible()
   await expect(page.getByText('die-api')).toBeVisible()
@@ -20,7 +20,7 @@ test('shows disconnected, then recovers on retry', async ({ page }) => {
     else await route.continue()
   })
 
-  await page.goto('/')
+  await page.goto('/status')
   await expect(page.getByRole('alert')).toContainText('Cannot reach the server')
   await expect(page.getByText('Disconnected')).toBeVisible()
 
@@ -33,7 +33,7 @@ test('shows disconnected, then recovers on retry', async ({ page }) => {
 
 test('has no horizontal scroll at phone width', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 800 })
-  await page.goto('/')
+  await page.goto('/status')
   await expect(page.getByRole('heading', { name: 'Connection status' })).toBeVisible()
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,

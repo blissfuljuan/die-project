@@ -21,14 +21,32 @@ import org.springframework.web.bind.annotation.RestController;
 public class ActivationController {
 
     public record CheckRequest(@NotBlank @Size(max = 254) String identifier,
-                               @NotBlank @Size(max = 64) String temporaryCredential) {}
+                               @NotBlank @Size(max = 64) String temporaryCredential) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "CheckRequest[redacted]";
+        }
+    }
 
     public record BeginRequest(@NotBlank @Size(max = 254) String identifier,
                                @NotBlank @Size(max = 64) String temporaryCredential,
                                @NotBlank @Email @Size(max = 254) String email,
-                               @NotBlank @Size(max = 128) String newPassword) {}
+                               @NotBlank @Size(max = 128) String newPassword) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "BeginRequest[redacted]";
+        }
+    }
 
-    public record VerifyRequest(@NotBlank @Size(max = 128) String token) {}
+    public record VerifyRequest(@NotBlank @Size(max = 128) String token) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "VerifyRequest[redacted]";
+        }
+    }
 
     private final ActivationService activation;
 

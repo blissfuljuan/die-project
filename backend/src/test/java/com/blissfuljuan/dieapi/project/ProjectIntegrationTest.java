@@ -70,11 +70,11 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
 
     private UUID clazz(String code, UUID instructor, String formation, int min, int max, boolean mayChange) {
         UUID id = jdbc.queryForObject("""
-            INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section,
-                   team_formation, team_min_size, team_max_size, students_may_change_teams)
-            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', ?, ?, ?, ?) RETURNING id
-            """, UUID.class, code, formation, min, max, mayChange);
-        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", id, instructor);
+            WITH c AS (INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section,
+                   team_formation, team_min_size, team_max_size, students_may_change_teams, owner_id)
+            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', ?, ?, ?, ?, ?) RETURNING id)
+            INSERT INTO class_instructor (class_id, user_id) SELECT id, ? FROM c RETURNING class_id
+            """, UUID.class, code, formation, min, max, mayChange, instructor, instructor);
         return id;
     }
 

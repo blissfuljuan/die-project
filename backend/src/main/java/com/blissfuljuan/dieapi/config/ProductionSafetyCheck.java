@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -19,6 +20,9 @@ import java.util.Set;
 public class ProductionSafetyCheck {
 
     private static final Logger log = LoggerFactory.getLogger(ProductionSafetyCheck.class);
+
+    private static final Set<String> WEAK_BROKER_PASSWORDS = Set.of("guest", "rabbitmq", "password", "die", "admin", "secret");
+    private static final int MIN_BROKER_PASSWORD_LENGTH = 16;
 
     private final Environment env;
 
@@ -60,6 +64,30 @@ public class ProductionSafetyCheck {
         }
         if (env.getProperty("spring.datasource.password", "").isBlank()) {
             problems.add("spring.datasource.password is empty");
+        }
+        if (env.getProperty("die.messaging.enabled", Boolean.class, true)) {
+            problems.addAll(brokerCredentialProblems(
+                env.getProperty("die.messaging.username", ""), env.getProperty("die.messaging.password", "")));
+        }
+        String frontend = env.getProperty("die.frontend-base-url", "");
+        if (!frontend.isBlank() && !frontend.toLowerCase(Locale.ROOT).startsWith("https://")) {
+            problems.add("die.frontend-base-url must be the public https:// address of the frontend (activation and reset links use it), not '"
+                + frontend + "'");
+        }
+        return problems;
+    }
+
+    /** Known-bad broker logins: empty, the broker's built-in guest account, example values from .env.example, too short. */
+    private static List<String> brokerCredentialProblems(String user, String password) {
+        List<String> problems = new ArrayList<>();
+        if (user.isBlank() || user.equalsIgnoreCase("guest")) {
+            problems.add("RabbitMQ user (RABBITMQ_USER) is empty or the default 'guest' account");
+        }
+        String lower = password.toLowerCase(Locale.ROOT);
+        if (password.isBlank() || WEAK_BROKER_PASSWORDS.contains(lower) || lower.startsWith("change-me")) {
+            problems.add("RabbitMQ password (RABBITMQ_PASSWORD) is empty or a default/example value");
+        } else if (password.length() < MIN_BROKER_PASSWORD_LENGTH) {
+            problems.add("RabbitMQ password (RABBITMQ_PASSWORD) is shorter than " + MIN_BROKER_PASSWORD_LENGTH + " characters");
         }
         return problems;
     }

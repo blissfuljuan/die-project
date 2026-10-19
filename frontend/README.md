@@ -2,7 +2,8 @@
 
 React + TypeScript (strict) + Vite, React Router, TanStack Query, Tailwind CSS 4, shadcn/ui primitives
 (`components.json`, `src/components/ui`), React Hook Form + Zod. It talks only to the Spring Boot REST API
-(`/api/v1`). Current scope: P0-VS01 (connection status page at `/`).
+(`/api/v1`). Current scope: P0-VS01 (system status page at `/status`) and P1 UI wave 1 (identity screens, app shell,
+role dashboards, read-only workspace/project pages).
 
 ## Run
 
@@ -15,6 +16,48 @@ npm run dev                 # http://localhost:5173, proxies /api -> http://loca
 Start the API first (from the repo root: `docker compose --profile apps up -d --build api`, or run
 `backend/` locally with `SPRING_PROFILES_ACTIVE=local`). The dev server proxy keeps the browser on one origin,
 so session and CSRF cookies work without CORS.
+
+## Routes
+
+One area per role (decision: separate prefixes, one shared shell). Guards are presentation only; the API decides what
+a user may read or change, and a wrong-role visit shows the neutral "Not found, or no access" screen.
+
+| Path | Who | Notes |
+|---|---|---|
+| `/login` | signed out | `?next=` return path (same-origin paths only); signed-in users are redirected away |
+| `/activate` | signed out | Step 1 Student ID/email + temporary credential (`/auth/activation/check`), step 2 email + new password (`/begin`), "check your email" |
+| `/verify-email?token=` | anyone | **Path used by the backend activation mail.** Posts the token once to `/auth/activation/verify`, then removes it from the URL |
+| `/forgot-password` | signed out | Always the same neutral confirmation; 429 shown as a throttling message |
+| `/reset-password?token=` | anyone | **Path used by the backend reset mail.** Posts token + new password, then removes the token from the URL |
+| `/status` | anyone | Connection/system status card (was `/` in P0) |
+| `/` | signed in | Redirects to the role home |
+| `/app` | Participant | Dashboard: my workspaces and projects |
+| `/coordinator` | Coordinator | Dashboard: workspaces with Owner badge, capability chips (from `myCapabilities`), project counts |
+| `/admin` | Administrator | Dashboard: platform health (`/ops/health`), links to placeholder pages |
+| `/admin/accounts`, `/admin/workspaces` | Administrator | "Coming soon" placeholders (listed in the nav) |
+| `/workspaces/:id`, `/projects/:id` | any signed-in | Read-only; shows only what the API returns (404/403 -> "Not found, or no access"; Administrators never see project lists) |
+| `/me` | any signed-in | Profile and change password |
+
+Session: `useSession` reads `GET /auth/me` (401 = signed out; an unreachable server is an error, not "signed out").
+Any API answer `401 AUTHENTICATION_REQUIRED` flips the session to signed out and the guards redirect to
+`/login?next=<current path>`. Login and logout clear the whole query cache. Backend error codes are turned into
+plain sentences in one place: `src/api/errorMessages.ts`. The API client retries a mutating request once after a
+`CSRF_TOKEN_INVALID` 403 with a fresh token.
+
+Backend mail links (`die.frontend-base-url` + path): activation `/verify-email?token=...`, reset
+`/reset-password?token=...`. Both match the routes above. The production nginx/Render static site must serve
+`index.html` for these paths (history fallback; already configured in `nginx.conf`).
+
+## End-to-end tests (Playwright, real backend)
+
+```bash
+# API reachable at http://localhost:8080 (or set VITE_DEV_PROXY_TARGET); bootstrap Administrator credentials:
+E2E_ADMIN_EMAIL=admin@example.edu E2E_ADMIN_PASSWORD='the-bootstrap-password' npm run test:e2e
+```
+
+`e2e/status.spec.ts` and the signed-out part of `e2e/auth.spec.ts` need no credentials; the Administrator tests are
+skipped with a clear message when `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD` are unset. PowerShell:
+`$env:E2E_ADMIN_EMAIL='...'; $env:E2E_ADMIN_PASSWORD='...'; npm run test:e2e`.
 
 ## Scripts
 
@@ -39,6 +82,7 @@ starting the dev server.
 | `VITE_API_BASE_URL` | `/api/v1` | API base used by the browser (build-time) |
 | `VITE_DEV_PROXY_TARGET` | `http://localhost:8080` | Dev/preview proxy target for `/api` (not exposed to the browser) |
 | `E2E_BASE_URL`, `E2E_CHANNEL` | unset | Playwright overrides |
+| `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD` | unset | Bootstrap Administrator for the sign-in e2e tests (tests skip when unset) |
 
 ## API client (`src/api`)
 

@@ -22,10 +22,22 @@ import java.util.UUID;
 @Service
 public class TempCredentialService {
 
-    public record Issued(String secret, OffsetDateTime expiresAt) {}
+    public record Issued(String secret, OffsetDateTime expiresAt) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "Issued[redacted]";
+        }
+    }
 
     /** A freshly generated secret and its hash, not yet attached to a user. */
-    public record Prepared(String secret, String hash) {}
+    public record Prepared(String secret, String hash) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "Prepared[redacted]";
+        }
+    }
 
     // No look-alike characters (0/O, 1/l/I).
     private static final String ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";

@@ -50,6 +50,38 @@ die:
     hash-threads: 4        # ~16 MB of memory per running hash
     hash-queue: 1000
     hash-timeout-seconds: 120
+  messaging:
+    # RabbitMQ (own container). Disabled in tests that do not need a broker. The API starts without a broker and
+    # reconnects on its own; unsent messages wait in the outbox table.
+    enabled: ${DIE_MESSAGING_ENABLED:true}
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:}
+    password: ${RABBITMQ_PASSWORD:}
+    virtual-host: /
+    consume-queues: die.test.results     # comma separated; consumer name for the inbox is the queue name
+    prefetch: 10
+    confirm-timeout-ms: 5000
+    relay:
+      enabled: true
+      poll-ms: 500
+      batch-size: 50
+      lease-seconds: 30
+      max-backoff-seconds: 30
+      max-refusals: 10
+  ops:
+    # Operations / platform health (P0-VS05).
+    max-heartbeat-age-seconds: 90        # a worker whose heartbeat is older is reported stale in GET /api/v1/ops/health
+    workers:
+      # Health endpoints of the workers, reachable from the API on the internal network. Blank = not monitored.
+      orchestrator-url: ${DIE_OPS_ORCHESTRATOR_HEALTH_URL:}
+      document-worker-url: ${DIE_OPS_DOCUMENT_WORKER_HEALTH_URL:}
+    reaper:
+      # Test jobs QUEUED/RUNNING for longer than this are failed (a lost result must not leave a job running forever).
+      enabled: true
+      interval-seconds: 60
+      stale-after-seconds: ${DIE_OPS_STALE_JOB_SECONDS:900}
+      batch-size: 100
   frontend-base-url: ${DIE_FRONTEND_BASE_URL:http://localhost:5173}
   mail:
     # smtp = real delivery (also set spring.mail.* and die.mail.from). log = print emails, including
@@ -85,7 +117,17 @@ management:
     health:
       probes:
         enabled: true
+      # Public endpoints expose the status word only: no hosts, credentials, versions or per-component breakdown.
+      # Per-dependency detail is the ADMIN-only GET /api/v1/ops/health.
       show-details: never
+      show-components: never
+      # The broker contributor does not exist when messaging is disabled (tests); do not fail the start for it.
+      validate-group-membership: false
+      group:
+        liveness:
+          include: livenessState          # the process is alive; never depends on Postgres or RabbitMQ
+        readiness:
+          include: readinessState,db,broker
 
 springdoc:
   api-docs:

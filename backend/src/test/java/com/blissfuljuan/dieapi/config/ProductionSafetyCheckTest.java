@@ -14,7 +14,10 @@ class ProductionSafetyCheckTest {
             .withProperty("die.mail.mode", "smtp")
             .withProperty("spring.datasource.username", "die_app")
             .withProperty("spring.datasource.password", "s3cret")
-            .withProperty("spring.flyway.user", "die_migrator");
+            .withProperty("spring.flyway.user", "die_migrator")
+            .withProperty("die.messaging.username", "die")
+            .withProperty("die.messaging.password", "a-long-random-broker-secret")
+            .withProperty("die.frontend-base-url", "https://die.example.edu");
     }
 
     @Test
@@ -41,7 +44,8 @@ class ProductionSafetyCheckTest {
             .withProperty("die.mail.mode", "log")
             .withProperty("spring.datasource.username", "postgres")
             .withProperty("spring.flyway.user", "postgres");
-        assertThat(ProductionSafetyCheck.violations(env)).hasSize(5);
+        // 5 database/cookie/mail problems + RabbitMQ user and password (messaging is on by default)
+        assertThat(ProductionSafetyCheck.violations(env)).hasSize(7);
     }
 
     @Test
@@ -60,11 +64,43 @@ class ProductionSafetyCheckTest {
     }
 
     @Test
+    void emptyOrDefaultBrokerCredentialsAreRejected() {
+        for (String user : new String[] {"", "guest", "GUEST"}) {
+            assertThat(ProductionSafetyCheck.violations(safeProduction().withProperty("die.messaging.username", user)))
+                .singleElement().asString().contains("RABBITMQ_USER");
+        }
+        for (String password : new String[] {"", "guest", "change-me-rabbit", "Change-Me-Please-Now", "rabbitmq", "short-secret"}) {
+            assertThat(ProductionSafetyCheck.violations(safeProduction().withProperty("die.messaging.password", password)))
+                .as("password '%s'", password)
+                .singleElement().asString().contains("RABBITMQ_PASSWORD");
+        }
+    }
+
+    @Test
+    void brokerCredentialsAreNotCheckedWhenMessagingIsDisabled() {
+        MockEnvironment env = safeProduction().withProperty("die.messaging.enabled", "false")
+            .withProperty("die.messaging.username", "guest").withProperty("die.messaging.password", "guest");
+        assertThat(ProductionSafetyCheck.violations(env)).isEmpty();
+    }
+
+    @Test
+    void theFrontendAddressMustBeHttps() {
+        assertThat(ProductionSafetyCheck.violations(
+            safeProduction().withProperty("die.frontend-base-url", "http://localhost:5173")))
+            .singleElement().asString().contains("die.frontend-base-url");
+        assertThat(ProductionSafetyCheck.violations(
+            safeProduction().withProperty("die.frontend-base-url", "http://die.example.edu")))
+            .singleElement().asString().contains("https");
+    }
+
+    @Test
     void mailDefaultsToSmtpWhenUnset() {
         MockEnvironment env = new MockEnvironment()
             .withProperty("server.servlet.session.cookie.secure", "true")
             .withProperty("spring.datasource.username", "die_app")
             .withProperty("spring.datasource.password", "x")
+            .withProperty("die.messaging.username", "die")
+            .withProperty("die.messaging.password", "a-long-random-broker-secret")
             .withProperty("spring.flyway.user", "die_migrator");
         assertThat(ProductionSafetyCheck.violations(env)).isEmpty();
     }

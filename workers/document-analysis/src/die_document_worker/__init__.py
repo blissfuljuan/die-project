@@ -1,0 +1,1 @@
+"""DIE document-analysis worker."""

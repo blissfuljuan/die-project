@@ -1,5 +1,6 @@
 package com.blissfuljuan.dieapi.roster.service;
 
+import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -38,7 +39,7 @@ public class RosterImportQueryService {
 
     @Transactional(readOnly = true)
     public List<ImportView> list(AppUserDetails user, UUID workspaceId) {
-        policy.requireClassManage(user, workspaceId);
+        policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
         return repo.listForClass(workspaceId).stream().map(this::view).toList();
     }
 
@@ -60,7 +61,7 @@ public class RosterImportQueryService {
     ImportHeader header(AppUserDetails user, UUID importId, boolean lock) {
         ImportHeader h = repo.find(importId, lock).orElseThrow(RosterImportQueryService::importNotFound);
         try {
-            policy.requireClassManage(user, h.workspaceId());
+            policy.requireWorkspaceCapability(user, h.workspaceId(), WorkspaceCapability.MANAGE_ROSTER);
         } catch (ApiException e) {
             throw importNotFound();
         }
