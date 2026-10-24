@@ -19,7 +19,7 @@ import { workspaceTitle } from '@/features/workspaces/labels'
 import { applyServerErrors } from '@/lib/forms'
 import { fullName } from '@/lib/roles'
 import { NotFoundBody } from '@/pages/ForbiddenPage'
-import { CredentialReveal } from './CredentialReveal'
+import { CredentialReveal } from '@/components/common/CredentialReveal'
 import { useEnroll, useReissueCredential, useRoster, useUnenroll } from './queries'
 
 const PAGE_SIZE = 50

@@ -34,7 +34,7 @@ a user may read or change, and a wrong-role visit shows the neutral "Not found, 
 | `/app` | Participant | Dashboard: my workspaces and projects |
 | `/coordinator` | Coordinator | Dashboard: workspaces with Owner badge, capability chips (from `myCapabilities`), project counts |
 | `/admin` | Administrator | Dashboard: platform health (`/ops/health`), links to placeholder pages |
-| `/admin/accounts` | Administrator | "Coming soon" placeholder (listed in the nav) |
+| `/admin/accounts` | Administrator | Accounts: search (name, Student ID, email) with role/status filters and paging; New account (Participant by Student ID, Coordinator/Administrator by email); deactivate and reset credentials (inline confirmation), activate again; temporary credentials are shown once. Deactivating the Owner of an active workspace shows the API's refusal with a link to `/admin/workspaces` |
 | `/admin/workspaces` | Administrator | All Project Workspaces with their Owner; "New Project Workspace" |
 | `/workspaces/new` | Coordinator, Administrator | Create a Project Workspace (a Coordinator becomes the Owner; an Administrator picks the Owner by searching accounts) |
 | `/workspaces/:id/edit` | Coordinator with Settings permission, Administrator | Edit settings; sends the version it saw and offers "Load the latest settings" on a 409 |

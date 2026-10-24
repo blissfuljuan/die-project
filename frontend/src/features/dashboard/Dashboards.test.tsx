@@ -154,7 +154,10 @@ describe('Administrator dashboard', () => {
     expect(screen.getByText('Down')).toBeInTheDocument()
     expect(screen.getByText('Worker: orchestrator')).toBeInTheDocument()
     expect(screen.getByText('die.jobs')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/admin/accounts')
+    // Both the sidebar entry and the card on the dashboard lead to the accounts page.
+    const links = screen.getAllByRole('link', { name: 'Accounts' })
+    expect(links.length).toBeGreaterThanOrEqual(1)
+    for (const link of links) expect(link).toHaveAttribute('href', '/admin/accounts')
   })
 
   it('shows an error with retry', async () => {

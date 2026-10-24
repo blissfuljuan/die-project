@@ -38,7 +38,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   ],
   ADMIN: [
     { to: '/admin', label: 'Dashboard', end: true },
-    { to: '/admin/accounts', label: 'Accounts', soon: true },
+    { to: '/admin/accounts', label: 'Accounts' },
     { to: '/admin/workspaces', label: 'Project Workspaces' },
     { to: '/me', label: 'My profile' },
   ],
