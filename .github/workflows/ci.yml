@@ -163,8 +163,21 @@ jobs:
             -e RABBITMQ_DEFAULT_USER=die -e RABBITMQ_DEFAULT_PASS=ci-rabbit-password \
             -v "$PWD/infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro" \
             rabbitmq:3.13-management-alpine
-          for _ in $(seq 1 60); do docker exec rabbit rabbitmq-diagnostics -q ping >/dev/null 2>&1 && break; sleep 2; done
-          for _ in $(seq 1 30); do docker exec rabbit rabbitmqctl -q import_definitions /etc/rabbitmq/definitions.json && break; sleep 2; done
+          # Run the control commands as the broker's own user (-u rabbitmq). As root, rabbitmqctl/rabbitmq-diagnostics can
+          # create a root-owned Erlang cookie while the node is still booting, which crashes the node (see
+          # infra/rabbitmq/die-entrypoint.sh). A crashed node was why the tests saw "connection refused".
+          ready=false
+          for _ in $(seq 1 60); do
+            if docker exec -u rabbitmq rabbit rabbitmq-diagnostics -q check_port_connectivity >/dev/null 2>&1; then ready=true; break; fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then echo "RabbitMQ did not start listening"; docker logs rabbit; exit 1; fi
+          imported=false
+          for _ in $(seq 1 30); do
+            if docker exec -u rabbitmq rabbit rabbitmqctl -q import_definitions /etc/rabbitmq/definitions.json; then imported=true; break; fi
+            sleep 2
+          done
+          if [ "$imported" != true ]; then echo "Importing the topology failed"; docker logs rabbit; exit 1; fi
       - name: pytest
         working-directory: workers/document-analysis
         env:
