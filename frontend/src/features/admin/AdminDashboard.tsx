@@ -68,14 +68,11 @@ function AreaLink({ to, title, text }: { to: string; title: string; text: string
     <li>
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">
-              <Link to={to} className="underline-offset-2 hover:underline">
-                {title}
-              </Link>
-            </CardTitle>
-            <Badge variant="outline">Coming soon</Badge>
-          </div>
+          <CardTitle className="text-base">
+            <Link to={to} className="underline-offset-2 hover:underline">
+              {title}
+            </Link>
+          </CardTitle>
           <CardDescription>{text}</CardDescription>
         </CardHeader>
       </Card>

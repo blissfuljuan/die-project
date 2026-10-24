@@ -4,6 +4,7 @@ import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage'
 import { VerifyEmailPage } from '@/features/auth/VerifyEmailPage'
+import { AccountsPage } from '@/features/accounts/AccountsPage'
 import { AdminDashboard } from '@/features/admin/AdminDashboard'
 import { CoordinatorDashboard } from '@/features/dashboard/CoordinatorDashboard'
 import { ParticipantDashboard } from '@/features/dashboard/ParticipantDashboard'
@@ -15,7 +16,6 @@ import { CreateWorkspacePage } from '@/features/workspaces/CreateWorkspacePage'
 import { EditWorkspacePage } from '@/features/workspaces/EditWorkspacePage'
 import { WorkspaceDetailPage } from '@/features/workspaces/WorkspaceDetailPage'
 import { AppShell } from '@/layouts/AppShell'
-import { ComingSoonPage } from '@/pages/ComingSoonPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { ProfilePage } from '@/pages/ProfilePage'
 import { StatusPage } from '@/pages/StatusPage'
@@ -59,7 +59,7 @@ export function AppRoutes() {
           </Route>
           <Route element={<RequireRole roles={['ADMIN']} />}>
             <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/accounts" element={<ComingSoonPage title="Accounts" />} />
+            <Route path="/admin/accounts" element={<AccountsPage />} />
             <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />
           </Route>
         </Route>
