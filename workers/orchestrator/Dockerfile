@@ -9,7 +9,7 @@ RUN mvn -B -q dependency:go-offline -Dcontracts.dir=/contracts/messaging
 COPY src ./src
 RUN mvn -B -q package -DskipTests -Dcontracts.dir=/contracts/messaging
 
-FROM eclipse-temurin:21-jre@sha256:227118764cccd3c3294617061aaa93a08309c63a395eefa83e6b35032992ea99
+FROM eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f
 # Non-root, no login shell, no home. The root filesystem is mounted read-only by compose (only /tmp is writable).
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
 WORKDIR /app
