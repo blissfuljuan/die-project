@@ -87,7 +87,7 @@
     <dependency>
       <groupId>com.rabbitmq</groupId>
       <artifactId>amqp-client</artifactId>
-      <version>5.22.0</version>
+      <version>5.37.0</version>
     </dependency>
     <!-- JSON Schema validation of message envelopes (uses Jackson 2 internally; app code uses Jackson 3) -->
     <dependency>
