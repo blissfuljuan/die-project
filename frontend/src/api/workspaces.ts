@@ -43,3 +43,83 @@ export const fetchWorkspaces = (signal?: AbortSignal, client: ApiClient = apiCli
 
 export const fetchWorkspace = (id: string, signal?: AbortSignal, client: ApiClient = apiClient) =>
   client.get<Workspace>(`/workspaces/${encodeURIComponent(id)}`, { signal, parse: (d) => workspaceSchema.parse(d) })
+
+// ---- management (create / edit / archive) ----
+
+export const TEAM_FORMATIONS = ['COORDINATOR_ASSIGNED', 'PARTICIPANT_FORMED'] as const
+export type TeamFormation = (typeof TEAM_FORMATIONS)[number]
+
+/** The settings of a Project Workspace as the create/edit forms send them. */
+export interface WorkspaceSettings {
+  academicYear: string
+  semester: string
+  subjectCode: string
+  subjectName: string
+  section: string
+  teamFormation: TeamFormation
+  teamMinSize: number
+  teamMaxSize: number
+  participantsMayChangeTeams: boolean
+}
+
+/** Administrators must name the Owner; a Coordinator who creates a workspace becomes its Owner. */
+export const createWorkspace = (input: WorkspaceSettings & { ownerId?: string }, client: ApiClient = apiClient) =>
+  client.post<Workspace>('/workspaces', input, { parse: (d) => workspaceSchema.parse(d) })
+
+/** `version` is the last version the user saw; the API answers 409 CLASS_VERSION_CONFLICT when it is stale. */
+export const updateWorkspace = (id: string, input: WorkspaceSettings & { version: number }, client: ApiClient = apiClient) =>
+  client.patch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, input, { parse: (d) => workspaceSchema.parse(d) })
+
+export const archiveWorkspace = (id: string, client: ApiClient = apiClient) =>
+  client.post<Workspace>(`/workspaces/${encodeURIComponent(id)}/archive`, undefined, { parse: (d) => workspaceSchema.parse(d) })
+
+/** Administrators only. */
+export const unarchiveWorkspace = (id: string, client: ApiClient = apiClient) =>
+  client.post<Workspace>(`/workspaces/${encodeURIComponent(id)}/unarchive`, undefined, { parse: (d) => workspaceSchema.parse(d) })
+
+// ---- coordinators and ownership ----
+
+export const coordinatorEntrySchema = z.object({
+  userId: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
+  owner: z.boolean(),
+  capabilities: z.array(z.string()).default([]),
+  assignedAt: z.string().nullish(),
+})
+export type CoordinatorEntry = z.infer<typeof coordinatorEntrySchema>
+
+export const coordinatorCandidateSchema = z.object({
+  userId: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
+  email: z.string(),
+})
+export type CoordinatorCandidate = z.infer<typeof coordinatorCandidateSchema>
+
+const ws = (id: string) => `/workspaces/${encodeURIComponent(id)}`
+
+export const fetchCoordinators = (id: string, signal?: AbortSignal, client: ApiClient = apiClient) =>
+  client.get<CoordinatorEntry[]>(`${ws(id)}/coordinators`, { signal, parse: (d) => z.array(coordinatorEntrySchema).parse(d) })
+
+/** Unassigned active Coordinator accounts whose name or email starts with `q` (3+ characters; at most 10 come back). */
+export const fetchCoordinatorCandidates = (id: string, q: string, signal?: AbortSignal, client: ApiClient = apiClient) =>
+  client.get<CoordinatorCandidate[]>(`${ws(id)}/coordinator-candidates?q=${encodeURIComponent(q)}`, {
+    signal,
+    parse: (d) => z.array(coordinatorCandidateSchema).parse(d),
+  })
+
+export const addCoordinator = (id: string, input: { userId: string; capabilities: string[] }, client: ApiClient = apiClient) =>
+  client.post<CoordinatorEntry>(`${ws(id)}/coordinators`, input, { parse: (d) => coordinatorEntrySchema.parse(d) })
+
+export const setCoordinatorCapabilities = (id: string, userId: string, capabilities: string[], client: ApiClient = apiClient) =>
+  client.patch<CoordinatorEntry>(`${ws(id)}/coordinators/${encodeURIComponent(userId)}`, { capabilities }, {
+    parse: (d) => coordinatorEntrySchema.parse(d),
+  })
+
+export const removeCoordinator = (id: string, userId: string, client: ApiClient = apiClient) =>
+  client.delete<void>(`${ws(id)}/coordinators/${encodeURIComponent(userId)}`)
+
+/** Owner or Administrator. Takes effect at once and is audited (ADR 0003). */
+export const transferOwnership = (id: string, userId: string, client: ApiClient = apiClient) =>
+  client.put<void>(`${ws(id)}/owner`, { userId })

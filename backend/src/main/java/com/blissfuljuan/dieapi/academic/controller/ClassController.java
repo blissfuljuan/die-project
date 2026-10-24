@@ -9,8 +9,9 @@ import com.blissfuljuan.dieapi.academic.service.ClassInstructorService;
 import com.blissfuljuan.dieapi.academic.service.ClassService;
 import com.blissfuljuan.dieapi.academic.view.ClassPage;
 import com.blissfuljuan.dieapi.academic.view.ClassView;
+import com.blissfuljuan.dieapi.academic.view.CoordinatorCandidate;
 import com.blissfuljuan.dieapi.academic.view.CoordinatorEntry;
-import com.blissfuljuan.dieapi.academic.view.EnrollmentView;
+import com.blissfuljuan.dieapi.academic.view.EnrollmentPage;
 import com.blissfuljuan.dieapi.academic.view.TemporaryCredentialView;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import jakarta.validation.Valid;
@@ -118,6 +119,13 @@ public class ClassController {
         return coordinators.list(user, id);
     }
 
+    /** Picker for "add a coordinator": needs MANAGE_COORDINATORS; a search of 3+ characters returns at most 10 unassigned coordinator accounts. */
+    @GetMapping("/{id}/coordinator-candidates")
+    public List<CoordinatorCandidate> coordinatorCandidates(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
+                                                            @RequestParam(defaultValue = "") String q) {
+        return coordinators.candidates(user, id, q);
+    }
+
     /** Owner, a coordinator with MANAGE_COORDINATORS, or an administrator; the target must be an active coordinator account. */
     @PostMapping("/{id}/coordinators")
     public ResponseEntity<CoordinatorEntry> addCoordinator(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
@@ -149,9 +157,11 @@ public class ClassController {
     }
 
     @GetMapping("/{id}/enrollments")
-    public List<EnrollmentView> roster(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
-                                       @RequestParam(defaultValue = "false") boolean includeRemoved) {
-        return enrollments.roster(user, id, includeRemoved);
+    public EnrollmentPage roster(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID id,
+                                 @RequestParam(defaultValue = "false") boolean includeRemoved,
+                                 @RequestParam(defaultValue = "0") int page,
+                                 @RequestParam(defaultValue = "100") int size) {
+        return enrollments.roster(user, id, includeRemoved, page, size);
     }
 
     @PostMapping("/{id}/enrollments")

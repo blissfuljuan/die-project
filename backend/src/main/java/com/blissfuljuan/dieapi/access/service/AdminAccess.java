@@ -7,7 +7,11 @@ import com.blissfuljuan.dieapi.access.repository.AccessRepository;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** Administrators see and administer every workspace and project, but have no access to their content (ADR 0002). */
 @Component
@@ -24,6 +28,10 @@ class AdminAccess implements RoleAccess {
     @Override public ClassRole classRole(UUID userId, UUID workspaceId) { return ClassRole.ADMIN; }
 
     @Override public ProjectRole projectRole(UUID userId, UUID projectId) { return ProjectRole.ADMIN; }
+
+    @Override public Map<UUID, ProjectRole> projectRoles(UUID userId, UUID workspaceId, Collection<UUID> projectIds) {
+        return projectIds.stream().collect(Collectors.toMap(Function.identity(), id -> ProjectRole.ADMIN));
+    }
 
     @Override public SqlScope visibleClasses(UUID userId) { return repo.allRows(); }
 

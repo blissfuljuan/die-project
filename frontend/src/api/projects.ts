@@ -46,10 +46,13 @@ export const projectSchema = z.object({
 export type Project = z.infer<typeof projectSchema>
 export type ProjectMember = z.infer<typeof memberSchema>
 
+const projectPageSchema = z.object({ items: z.array(projectSchema), page: z.number(), size: z.number(), total: z.number() })
+
+/** The API pages this list; the screens show the first 100 projects of a workspace (the largest page the API serves). */
 export const fetchWorkspaceProjects = (workspaceId: string, signal?: AbortSignal, client: ApiClient = apiClient) =>
-  client.get<Project[]>(`/workspaces/${encodeURIComponent(workspaceId)}/projects`, {
+  client.get<Project[]>(`/workspaces/${encodeURIComponent(workspaceId)}/projects?size=100`, {
     signal,
-    parse: (d) => z.array(projectSchema).parse(d),
+    parse: (d) => projectPageSchema.parse(d).items,
   })
 
 export const fetchProject = (id: string, signal?: AbortSignal, client: ApiClient = apiClient) =>

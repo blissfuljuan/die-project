@@ -11,6 +11,7 @@ import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.academic.view.ClassPage;
 import com.blissfuljuan.dieapi.academic.view.ClassView;
 import com.blissfuljuan.dieapi.academic.view.ClassView.CoordinatorRef;
+import com.blissfuljuan.dieapi.academic.view.CoordinatorCandidate;
 import com.blissfuljuan.dieapi.academic.view.CoordinatorEntry;
 import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.academic.view.EnrollmentView;
@@ -215,6 +216,24 @@ public class ClassRepository {
      * that a concurrent deactivation / role change of the same account (which takes the row FOR UPDATE) cannot
      * slip between this check and the commit of the assignment or ownership transfer that relies on it.
      */
+    /**
+     * Active coordinator accounts not yet assigned to the workspace whose email or name starts with {@code prefix}
+     * (already lower-cased and LIKE-escaped by the caller). Few rows, for a picker.
+     */
+    public List<CoordinatorCandidate> coordinatorCandidates(UUID workspaceId, String prefix, int limit) {
+        return jdbc.sql("""
+                SELECT u.id, u.first_name, u.last_name, u.email FROM app_user u
+                WHERE u.role = 'COORDINATOR' AND u.status <> 'DEACTIVATED'
+                  AND NOT EXISTS (SELECT 1 FROM class_instructor ci WHERE ci.class_id = :c AND ci.user_id = u.id)
+                  AND (lower(u.email) LIKE :p ESCAPE '\\' OR lower(u.last_name) LIKE :p ESCAPE '\\' OR lower(u.first_name) LIKE :p ESCAPE '\\')
+                ORDER BY u.last_name, u.first_name, u.id LIMIT :limit
+                """)
+            .param("c", workspaceId).param("p", prefix + "%").param("limit", limit)
+            .query((rs, n) -> new CoordinatorCandidate(rs.getObject("id", UUID.class), rs.getString("first_name"),
+                rs.getString("last_name"), rs.getString("email")))
+            .list();
+    }
+
     public long countAssignableInstructors(Collection<UUID> ids) {
         if (ids.isEmpty()) return 0;
         return jdbc.sql("""
@@ -247,15 +266,16 @@ public class ClassRepository {
 
     // ---- enrollments ----
 
-    public List<EnrollmentView> enrollments(UUID workspaceId, boolean includeRemoved) {
+    public List<EnrollmentView> enrollments(UUID workspaceId, boolean includeRemoved, int limit, int offset) {
         return jdbc.sql("""
                 SELECT u.id, u.student_number, u.last_name, u.first_name, u.middle_name, u.email,
                        u.status AS account_status, e.program, e.section, e.status, e.enrolled_at, e.removed_at
                 FROM enrollment e JOIN app_user u ON u.id = e.student_id
                 WHERE e.class_id = :c AND (:all OR e.status = 'ENROLLED')
                 ORDER BY u.last_name, u.first_name, u.id
+                LIMIT :limit OFFSET :offset
                 """)
-            .param("c", workspaceId).param("all", includeRemoved)
+            .param("c", workspaceId).param("all", includeRemoved).param("limit", limit).param("offset", offset)
             .query((rs, n) -> new EnrollmentView(rs.getObject("id", UUID.class), rs.getString("student_number"),
                 rs.getString("last_name"), rs.getString("first_name"), rs.getString("middle_name"),
                 rs.getString("email"), rs.getString("account_status"), rs.getString("program"),
@@ -263,6 +283,11 @@ public class ClassRepository {
                 rs.getObject("enrolled_at", java.time.OffsetDateTime.class),
                 rs.getObject("removed_at", java.time.OffsetDateTime.class)))
             .list();
+    }
+
+    public long countEnrollments(UUID workspaceId, boolean includeRemoved) {
+        return jdbc.sql("SELECT count(*) FROM enrollment WHERE class_id = :c AND (:all OR status = 'ENROLLED')")
+            .param("c", workspaceId).param("all", includeRemoved).query(Long.class).single();
     }
 
     public Optional<StudentRef> findStudentById(UUID id) {

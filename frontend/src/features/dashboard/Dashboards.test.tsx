@@ -3,6 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { API, http, HttpResponse, server } from '@/test/server'
 import { admin, coordinator, mockSession, participant, problem, renderApp } from '@/test/utils'
 
+/** The API pages project lists: { items, page, size, total }. */
+const pageOf = (items: unknown[]) => ({ items, page: 0, size: 100, total: items.length })
+
 const workspace = (over: Record<string, unknown> = {}) => ({
   id: 'w-1',
   academicYear: '2026-2027',
@@ -48,7 +51,7 @@ describe('Participant dashboard', () => {
   it('shows a loading state, then my workspaces and projects', async () => {
     server.use(
       http.get(`${API}/workspaces`, () => page([workspace()])),
-      http.get(`${API}/workspaces/w-1/projects`, () => HttpResponse.json([project()])),
+      http.get(`${API}/workspaces/w-1/projects`, () => HttpResponse.json(pageOf([project()]))),
     )
     renderApp('/app')
     expect(await screen.findByText(/welcome, ana/i)).toBeInTheDocument()
@@ -71,7 +74,7 @@ describe('Participant dashboard', () => {
     let fail = true
     server.use(
       http.get(`${API}/workspaces`, () => (fail ? problem(500, 'INTERNAL_ERROR') : page([workspace()]))),
-      http.get(`${API}/workspaces/w-1/projects`, () => HttpResponse.json([])),
+      http.get(`${API}/workspaces/w-1/projects`, () => HttpResponse.json(pageOf([]))),
     )
     const user = userEvent.setup()
     renderApp('/app')
@@ -99,8 +102,8 @@ describe('Coordinator dashboard', () => {
       http.get(`${API}/workspaces`, () =>
         page([workspace(), workspace({ id: 'w-2', subjectCode: 'IT200', subjectName: 'Databases', ownerId: 'someone-else', myCapabilities: ['MANAGE_ROSTER'] })]),
       ),
-      http.get(`${API}/workspaces/w-1/projects`, () => HttpResponse.json([project(), project({ id: 'p-2', status: 'ARCHIVED' })])),
-      http.get(`${API}/workspaces/w-2/projects`, () => HttpResponse.json([])),
+      http.get(`${API}/workspaces/w-1/projects`, () => HttpResponse.json(pageOf([project(), project({ id: 'p-2', status: 'ARCHIVED' })]))),
+      http.get(`${API}/workspaces/w-2/projects`, () => HttpResponse.json(pageOf([]))),
     )
     renderApp('/coordinator')
     const first = (await screen.findByRole('link', { name: 'CS101 Software Engineering' })).closest('li')!
@@ -167,14 +170,18 @@ describe('Read-only detail pages', () => {
     let projectCalls = 0
     server.use(
       http.get(`${API}/workspaces/w-1`, () => HttpResponse.json(workspace())),
+      http.get(`${API}/workspaces/w-1/coordinators`, () =>
+        HttpResponse.json([{ userId: 'u-coordinator', firstName: 'Carl', lastName: 'Dela Cruz', owner: true, capabilities: [], assignedAt: null }]),
+      ),
       http.get(`${API}/workspaces/w-1/projects`, () => {
         projectCalls += 1
-        return HttpResponse.json([])
+        return HttpResponse.json(pageOf([]))
       }),
     )
     renderApp('/workspaces/w-1')
     expect(await screen.findByRole('heading', { name: 'CS101 Software Engineering' })).toBeInTheDocument()
-    expect(screen.getByText('Carl Dela Cruz')).toBeInTheDocument()
+    // The Coordinators panel loads its own list, so the name arrives a moment after the heading.
+    expect(await screen.findByText('Carl Dela Cruz')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Projects' })).not.toBeInTheDocument()
     expect(projectCalls).toBe(0)
   })
@@ -191,7 +198,11 @@ describe('Read-only detail pages', () => {
     server.use(http.get(`${API}/projects/p-1`, () => HttpResponse.json(project())))
     renderApp('/projects/p-1')
     expect(await screen.findByRole('heading', { name: 'Library app' })).toBeInTheDocument()
-    expect(screen.getByText('Ana Reyes')).toBeInTheDocument()
+    // The signed-in participant is also Ana Reyes, so the name appears in the account menu too: look inside the member list.
+    const members = screen.getAllByRole('listitem').filter((li) => li.textContent?.includes('Representative'))
+    expect(members).toHaveLength(1)
+    const [representative] = members
+    expect(within(representative as HTMLElement).getByText('Ana Reyes')).toBeInTheDocument()
     expect(screen.queryByText(/student id/i)).not.toBeInTheDocument()
     expect(screen.getByText(/smaller than the minimum team size/i)).toBeInTheDocument()
   })

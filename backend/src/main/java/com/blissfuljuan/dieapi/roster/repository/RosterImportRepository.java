@@ -214,4 +214,13 @@ public class RosterImportRepository {
             .param("sn", studentNumber).param("ln", lastName).param("fn", firstName).param("mn", middleName)
             .param("by", createdBy).query(UUID.class).single();
     }
+
+    /** Deletes imports that never committed (PREVIEW or CANCELLED) and are older than the retention; rows cascade. */
+    public int deleteUncommittedOlderThanDays(int days) {
+        return jdbc.sql("""
+                DELETE FROM roster_import WHERE status IN ('PREVIEW', 'CANCELLED')
+                  AND created_at < now() - make_interval(days => :d)
+                """)
+            .param("d", days).update();
+    }
 }

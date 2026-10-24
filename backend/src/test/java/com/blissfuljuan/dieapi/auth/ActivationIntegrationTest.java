@@ -170,7 +170,7 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
     }
 
     @Test
-    void resetUserKeepingVerifiedEmailIsActiveImmediatelyWithoutNewMail() throws Exception {
+    void resetUserWithVerifiedEmailMustStillConfirmThroughThatMailbox() throws Exception {
         activeUser("admin@example.edu", "ADMIN", ADMIN_PASSWORD);
         UUID teacher = activeUser("teacher@example.edu", "COORDINATOR", "old passphrase 123");
         Cookie admin = sessionOf(login("admin@example.edu", ADMIN_PASSWORD));
@@ -179,9 +179,14 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
 
         assertThat(status(login("teacher@example.edu", "old passphrase 123"))).isEqualTo(401);
 
+        // Holding the temporary secret is not enough: the account stays pending until the emailed link is used.
         MvcResult begun = begin("teacher@example.edu", temp, "teacher@example.edu", NEW_PASSWORD);
-        assertThat((String) JsonPath.read(body(begun), "$.status")).isEqualTo("ACTIVE");
-        assertThat(mail.sent).isEmpty();
+        assertThat((String) JsonPath.read(body(begun), "$.status")).isEqualTo("VERIFICATION_REQUIRED");
+        assertThat(status(login("teacher@example.edu", NEW_PASSWORD))).isEqualTo(401);
+        assertThat(mail.sent).hasSize(1);
+        assertThat(mail.sent.get(0).to()).isEqualTo("teacher@example.edu");
+
+        assertThat(status(verify(mail.sent.get(0).token()))).isEqualTo(200);
         assertThat(status(login("teacher@example.edu", NEW_PASSWORD))).isEqualTo(200);
     }
 
@@ -199,7 +204,7 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
     }
 
     @Test
-    void replacingAVerifiedEmailIsAuditedWithBothAddressesAndWarnsThePreviousOne() throws Exception {
+    void aVerifiedEmailCannotBeReplacedDuringActivationEvenRepeatedly() throws Exception {
         // Account reset by an admin: email stays verified, password cleared, new temporary credential.
         UUID id = jdbc.queryForObject("""
             INSERT INTO app_user (role, status, last_name, first_name, email, email_verified_at)
@@ -208,15 +213,17 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
         jdbc.update("INSERT INTO temp_credential (user_id, secret_hash, expires_at) VALUES (?, ?, now() + interval '14 days')",
             id, encoder.encode(TEMP));
 
-        MvcResult begun = begin("ana@example.edu", TEMP, "someone.else@example.edu", NEW_PASSWORD);
-        assertThat((String) JsonPath.read(body(begun), "$.status")).isEqualTo("VERIFICATION_REQUIRED");
+        MvcResult refused = begin("ana@example.edu", TEMP, "someone.else@example.edu", NEW_PASSWORD);
+        assertThat(status(refused)).isEqualTo(400);
+        assertThat(body(refused)).contains("ACTIVATION_EMAIL_LOCKED");
 
-        assertThat(mail.sent).extracting(CapturingEmailSender.Message::to)
-            .containsExactlyInAnyOrder("ana@example.edu", "someone.else@example.edu");
-        String details = jdbc.queryForObject(
-            "SELECT details::text FROM audit_log WHERE action = 'ACTIVATION_STARTED' AND resource_id = ?",
-            String.class, id.toString());
-        assertThat(details).contains("ana@example.edu").contains("someone.else@example.edu");
+        // Starting with the real address and then trying again with another one must not unlock it either.
+        assertThat(status(begin("ana@example.edu", TEMP, "ana@example.edu", NEW_PASSWORD))).isEqualTo(200);
+        assertThat(status(begin("ana@example.edu", TEMP, "someone.else@example.edu", NEW_PASSWORD))).isEqualTo(400);
+
+        assertThat(jdbc.queryForObject("SELECT email FROM app_user WHERE id = ?", String.class, id)).isEqualTo("ana@example.edu");
+        assertThat(jdbc.queryForObject("SELECT email_verified_at IS NOT NULL FROM app_user WHERE id = ?", Boolean.class, id)).isTrue();
+        assertThat(mail.sent).extracting(CapturingEmailSender.Message::to).containsOnly("ana@example.edu");
     }
 
     // ---- failure handling ----
@@ -237,16 +244,35 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
     }
 
     @Test
-    void repeatedWrongSecretsLockTheCredentialUntilAnAdminResetsIt() throws Exception {
+    void repeatedWrongSecretsLockTheCredentialTemporarilyAndNeverBurnIt() throws Exception {
         UUID id = pendingStudent("2024-0104");
-        for (int i = 0; i < 5; i++) {
-            assertThat(status(check("2024-0104", "wrong-" + i))).isEqualTo(401);
+        // The per-address throttle stops ordinary guessing at 5; the credential's own counter is the distributed backstop.
+        jdbc.update("UPDATE temp_credential SET failed_attempts = 19 WHERE user_id = ?", id);
+        assertThat(status(check("2024-0104", "wrong"))).isEqualTo(401);
+
+        assertThat(invalidReason(id)).isNull();   // not invalidated: no administrator reset needed
+        assertThat(jdbc.queryForObject("SELECT locked_until > now() FROM temp_credential WHERE user_id = ?", Boolean.class, id)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'TEMP_CREDENTIAL_LOCKED'", Integer.class)).isEqualTo(1);
+
+        // While locked even the correct secret is refused (same 401 as every other failure).
+        jdbc.update("DELETE FROM login_attempt");
+        assertThat(status(check("2024-0104", TEMP))).isEqualTo(401);
+
+        // The lock lapses by itself.
+        jdbc.update("UPDATE temp_credential SET locked_until = now() - interval '1 minute' WHERE user_id = ?", id);
+        jdbc.update("DELETE FROM login_attempt");
+        assertThat(status(check("2024-0104", TEMP))).isEqualTo(200);
+    }
+
+    @Test
+    void reachingAThrottleLimitIsAuditedOnceWithoutTheIdentifier() throws Exception {
+        pendingStudent("2024-0108");
+        for (int i = 0; i < 7; i++) {
+            check("2024-0108", "wrong-" + i);
         }
-        assertThat(invalidReason(id)).isEqualTo("LOCKED");
-        // Even the correct secret no longer works (credential invalid, and the identifier is throttled).
-        int after = status(check("2024-0104", TEMP));
-        assertThat(after).isIn(401, 429);
-        assertThat(status(begin("2024-0104", TEMP, "x@example.edu", NEW_PASSWORD))).isIn(401, 429);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'THROTTLE_TRIGGERED'", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT details::text FROM audit_log WHERE action = 'THROTTLE_TRIGGERED'", String.class))
+            .contains("IDENTIFIER_FROM_ADDRESS").doesNotContain("2024-0108");
     }
 
     @Test
@@ -260,12 +286,22 @@ class ActivationIntegrationTest extends PostgresIntegrationTest {
     }
 
     @Test
-    void emailAlreadyUsedByAnotherAccountIsRejectedAndLeavesStateUntouched() throws Exception {
+    void emailUsedByAnotherAccountLooksLikeSuccessButChangesNothingAndWarnsTheOwner() throws Exception {
         activeUser("taken@example.edu", "COORDINATOR", "whatever passphrase");
         UUID id = pendingStudent("2024-0106");
-        assertThat(status(begin("2024-0106", TEMP, "taken@example.edu", NEW_PASSWORD))).isEqualTo(409);
+        MvcResult result = begin("2024-0106", TEMP, "Taken@example.edu", NEW_PASSWORD);
+
+        // Indistinguishable from the normal answer: the caller learns nothing about who is registered.
+        assertThat(status(result)).isEqualTo(200);
+        assertThat(body(result)).contains("VERIFICATION_REQUIRED");
         assertThat(jdbc.queryForObject("SELECT email FROM app_user WHERE id = ?", String.class, id)).isNull();
-        assertThat(mail.sent).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT password_hash FROM app_user WHERE id = ?", String.class, id)).isNull();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM email_verification_token WHERE user_id = ?", Integer.class, id)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'ACTIVATION_EMAIL_CONFLICT'", Integer.class)).isEqualTo(1);
+        // The only mail goes to the existing owner, and it carries no link.
+        assertThat(mail.sent).hasSize(1);
+        assertThat(mail.sent.get(0).to()).isEqualTo("taken@example.edu");
+        assertThat(mail.sent.get(0).body()).doesNotContain("token=");
     }
 
     @Test

@@ -35,6 +35,15 @@ public class TempCredentialRepository {
             .query((rs, n) -> rs.getObject("expires_at", OffsetDateTime.class)).single();
     }
 
+    /** Locks the credential for a while and restarts its guess counter; it becomes usable again by itself. */
+    public void lockTemporarily(UUID credentialId, int minutes) {
+        jdbc.sql("""
+                UPDATE temp_credential SET locked_until = now() + make_interval(mins => :m), failed_attempts = 0
+                WHERE id = :id
+                """)
+            .param("m", minutes).param("id", credentialId).update();
+    }
+
     /** Counts a wrong guess against one credential and returns the new total. */
     public int incrementFailedAttempts(UUID credentialId) {
         return jdbc.sql("""

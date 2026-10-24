@@ -159,6 +159,7 @@ class EndpointAuthorizationMatrixTest extends PostgresIntegrationTest {
         m.add(ep("POST", "/api/v1/workspaces/{id}/archive", Rule.CLASS_MANAGE, a + "/archive", none));
         m.add(ep("POST", "/api/v1/workspaces/{id}/unarchive", Rule.ADMIN, a + "/unarchive", none));
         m.add(ep("GET", "/api/v1/workspaces/{id}/coordinators", Rule.CLASS_MANAGE, a + "/coordinators", none));
+        m.add(ep("GET", "/api/v1/workspaces/{id}/coordinator-candidates", Rule.COORDINATORS_MANAGE, a + "/coordinator-candidates?q=abc", none));
         m.add(ep("POST", "/api/v1/workspaces/{id}/coordinators", Rule.COORDINATORS_MANAGE, a + "/coordinators", () -> "{\"userId\":\"" + iB + "\"}"));
         m.add(ep("PATCH", "/api/v1/workspaces/{id}/coordinators/{userId}", Rule.COORDINATORS_MANAGE, a + "/coordinators/" + iD,
             () -> "{\"capabilities\":[\"MANAGE_ROSTER\"]}"));

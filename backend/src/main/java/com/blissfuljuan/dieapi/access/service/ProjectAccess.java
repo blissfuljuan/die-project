@@ -9,6 +9,8 @@ import com.blissfuljuan.dieapi.common.exception.ApiException;
 import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
 
 /** Who may see or change a project. Outsiders and classmates who are not on the team get the same 404 as for a missing project. */
@@ -30,6 +32,11 @@ class ProjectAccess {
             return ProjectRole.NONE;
         }
         return roles.forRole(user.role()).projectRole(user.getId(), projectId);
+    }
+
+    /** Roles for several projects of one workspace in one go (used by listings; a project the user cannot see is NONE). */
+    Map<UUID, ProjectRole> projectRoles(AppUserDetails user, UUID workspaceId, Collection<UUID> projectIds) {
+        return roles.forRole(user.role()).projectRoles(user.getId(), workspaceId, projectIds);
     }
 
     /** Caller may read the project (staff of its class, current team members). Otherwise 404. */

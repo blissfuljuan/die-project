@@ -92,13 +92,13 @@ describe('navigation by role', () => {
     expect(within(nav).queryByRole('link', { name: /accounts/i })).not.toBeInTheDocument()
   })
 
-  it('Administrator sees account and workspace entries labelled "Coming soon"', async () => {
+  it('Administrator sees Accounts labelled "Coming soon" and Project Workspaces as a working page', async () => {
     mockSession(admin)
     mockLists()
     renderApp('/admin')
     const nav = (await screen.findAllByRole('navigation', { name: 'Main' }))[0]!
     expect(within(nav).getByRole('link', { name: /accounts/i })).toHaveTextContent(/coming soon/i)
-    expect(within(nav).getByRole('link', { name: /project workspaces/i })).toHaveTextContent(/coming soon/i)
+    expect(within(nav).getByRole('link', { name: /project workspaces/i })).not.toHaveTextContent(/coming soon/i)
   })
 
   it('shows the user name and role in the menu and signs out, clearing the session', async () => {

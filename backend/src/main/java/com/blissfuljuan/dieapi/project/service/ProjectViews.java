@@ -36,11 +36,16 @@ public class ProjectViews {
     }
 
     public ProjectView build(ProjectRow p, ProjectRole role, LockedClass cls, List<MemberRow> members) {
+        List<InvitationView> pending = role.canEdit() && p.kind() == ProjectKind.TEAM ? repo.pendingInvitations(p.id()) : List.of();
+        return build(p, role, cls, members, pending);
+    }
+
+    /** Same view with the pending invitations already loaded (listings load them for all projects at once). */
+    public ProjectView build(ProjectRow p, ProjectRole role, LockedClass cls, List<MemberRow> members, List<InvitationView> pending) {
         boolean staff = role.isStaff();
         List<MemberView> memberViews = members.stream().map(m -> new MemberView(m.userId(), m.firstName(), m.lastName(),
             staff ? m.studentNumber() : null, m.role().name(), m.joinedAt())).toList();
         boolean meetsMin = p.kind() == ProjectKind.INDIVIDUAL ? members.size() == 1 : members.size() >= cls.teamMinSize();
-        List<InvitationView> pending = role.canEdit() && p.kind() == ProjectKind.TEAM ? repo.pendingInvitations(p.id()) : List.of();
         return new ProjectView(p.id(), p.workspaceId(), p.kind().name(), p.title(), p.description(), p.teamName(), p.status().name(),
             p.version(), p.createdAt(), role.name(), memberViews,
             new TeamPolicy(cls.teamFormation().name(), cls.teamMinSize(), cls.teamMaxSize(), cls.participantsMayChangeTeams()),

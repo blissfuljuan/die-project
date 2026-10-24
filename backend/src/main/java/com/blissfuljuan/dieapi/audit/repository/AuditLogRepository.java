@@ -27,4 +27,25 @@ public class AuditLogRepository {
             .param("details", detailsJson)
             .update();
     }
+
+    /** How many times this actor did {@code action} in the last {@code minutes} (database clock). */
+    public long countByActorSince(UUID actorUserId, String action, int minutes) {
+        return jdbc.sql("""
+                SELECT count(*) FROM audit_log
+                WHERE actor_user_id = :actor AND action = :action AND occurred_at > now() - make_interval(mins => :m)
+                """)
+            .param("actor", actorUserId).param("action", action).param("m", minutes)
+            .query(Long.class).single();
+    }
+
+    /** How many times {@code action} was recorded for one resource in the last {@code minutes}. */
+    public long countByResourceSince(String action, String resourceType, String resourceId, int minutes) {
+        return jdbc.sql("""
+                SELECT count(*) FROM audit_log
+                WHERE action = :action AND resource_type = :type AND resource_id = :rid
+                  AND occurred_at > now() - make_interval(mins => :m)
+                """)
+            .param("action", action).param("type", resourceType).param("rid", resourceId).param("m", minutes)
+            .query(Long.class).single();
+    }
 }

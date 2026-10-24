@@ -47,3 +47,18 @@ describe('friendlyMessage', () => {
     expect(friendlyMessage(new NetworkError(true))).toMatch(/too long/i)
   })
 })
+
+describe('csv', () => {
+  it('neutralises spreadsheet formulas and quotes awkward cells', async () => {
+    const { csvCell, toCsv } = await import('./csv')
+    expect(csvCell('=SUM(A1)')).toBe("'=SUM(A1)")
+    expect(csvCell('+1')).toBe("'+1")
+    expect(csvCell('-2')).toBe("'-2")
+    expect(csvCell('@x')).toBe("'@x")
+    expect(csvCell('plain')).toBe('plain')
+    expect(csvCell('a,b')).toBe('"a,b"')
+    expect(csvCell('say "hi"')).toBe('"say ""hi"""')
+    expect(csvCell(null)).toBe('')
+    expect(toCsv(['a', 'b'], [['1', '=2']])).toBe("a,b\r\n1,'=2\r\n")
+  })
+})

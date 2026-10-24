@@ -2,7 +2,7 @@
 
 React + TypeScript (strict) + Vite, React Router, TanStack Query, Tailwind CSS 4, shadcn/ui primitives
 (`components.json`, `src/components/ui`), React Hook Form + Zod. It talks only to the Spring Boot REST API
-(`/api/v1`). Current scope: P0-VS01 (system status page at `/status`) and P1 UI wave 1 (identity screens, app shell,
+(`/api/v1`). Workspace management UI (P1-VS03): see `src/features/workspaces/`. Confirmations are inline panels (no modal dialog dependency). Current scope: P0-VS01 (system status page at `/status`) and P1 UI wave 1 (identity screens, app shell,
 role dashboards, read-only workspace/project pages).
 
 ## Run
@@ -34,8 +34,13 @@ a user may read or change, and a wrong-role visit shows the neutral "Not found, 
 | `/app` | Participant | Dashboard: my workspaces and projects |
 | `/coordinator` | Coordinator | Dashboard: workspaces with Owner badge, capability chips (from `myCapabilities`), project counts |
 | `/admin` | Administrator | Dashboard: platform health (`/ops/health`), links to placeholder pages |
-| `/admin/accounts`, `/admin/workspaces` | Administrator | "Coming soon" placeholders (listed in the nav) |
-| `/workspaces/:id`, `/projects/:id` | any signed-in | Read-only; shows only what the API returns (404/403 -> "Not found, or no access"; Administrators never see project lists) |
+| `/admin/accounts` | Administrator | "Coming soon" placeholder (listed in the nav) |
+| `/admin/workspaces` | Administrator | All Project Workspaces with their Owner; "New Project Workspace" |
+| `/workspaces/new` | Coordinator, Administrator | Create a Project Workspace (a Coordinator becomes the Owner; an Administrator picks the Owner by searching accounts) |
+| `/workspaces/:id/edit` | Coordinator with Settings permission, Administrator | Edit settings; sends the version it saw and offers "Load the latest settings" on a 409 |
+| `/workspaces/:id/roster` | Coordinator with Participants permission, Administrator | Paged roster (50 per page, "show removed"), enroll by Student ID + last name, "New credential" for Participants who have not activated (shown once), remove with confirmation |
+| `/workspaces/:id/roster/import` | same | Upload .csv/.xlsx -> preview (counts, per-row outcome, filter) -> decide conflicts -> Import -> one-time credentials table + CSV download (formula-safe, `lib/csv.ts`) |
+| `/workspaces/:id`, `/projects/:id` | any signed-in | Shows only what the API returns (404/403 -> "Not found, or no access"; Administrators never see project lists). The workspace page also has Edit settings / Archive (confirmation) / Restore (Administrators), and for Coordinators and Administrators the **Coordinators panel**: Owner badge, permissions per Coordinator, change permissions, remove, add (candidate search), transfer ownership |
 | `/me` | any signed-in | Profile and change password |
 
 Session: `useSession` reads `GET /auth/me` (401 = signed out; an unreachable server is an error, not "signed out").

@@ -85,6 +85,11 @@ public class AccessPolicy {
         return projects.projectRole(user, projectId);
     }
 
+    /** The caller's role in each of several projects of one workspace, computed with a constant number of queries. */
+    public Map<UUID, ProjectRole> projectRoles(AppUserDetails user, UUID workspaceId, Collection<UUID> projectIds) {
+        return projects.projectRoles(user, workspaceId, projectIds);
+    }
+
     /** Caller may read the project (staff of its class, current team members). Otherwise 404. */
     public ProjectRole requireProjectView(AppUserDetails user, UUID projectId) {
         return projects.requireView(user, projectId);

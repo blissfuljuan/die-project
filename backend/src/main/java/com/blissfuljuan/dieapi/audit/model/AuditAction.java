@@ -3,6 +3,7 @@ package com.blissfuljuan.dieapi.audit.model;
 /** Every audited action. The constant name is exactly the string stored in audit_log.action. */
 public enum AuditAction {
     ACCOUNT_ACTIVATED,
+    ACTIVATION_EMAIL_CONFLICT,
     ACTIVATION_FAILED,
     ACTIVATION_STARTED,
     BOOTSTRAP_ADMIN_CREATED,
@@ -44,6 +45,7 @@ public enum AuditAction {
     TEAM_INVITATION_DECLINED,
     TEAM_INVITATION_SENT,
     TEMP_CREDENTIAL_LOCKED,
+    THROTTLE_TRIGGERED,
     TEMP_CREDENTIAL_REISSUED,
     USER_ACTIVATED,
     USER_CREATED,

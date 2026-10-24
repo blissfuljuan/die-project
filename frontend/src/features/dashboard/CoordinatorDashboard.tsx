@@ -1,5 +1,7 @@
+import { Link } from 'react-router-dom'
 import { PageHeader } from '@/components/common/PageHeader'
 import { EmptyState, QueryList } from '@/components/common/QueryState'
+import { Button } from '@/components/ui/button'
 import { useSession } from '@/features/session/useSession'
 import { useWorkspaces } from '@/features/workspaces/queries'
 import { WorkspaceCard } from '@/features/workspaces/WorkspaceCard'
@@ -14,6 +16,11 @@ export function CoordinatorDashboard() {
       <PageHeader
         title={`Welcome, ${user.firstName}`}
         description="The Project Workspaces you coordinate, with what you are allowed to do in each."
+        actions={
+          <Button asChild>
+            <Link to="/workspaces/new">New Project Workspace</Link>
+          </Button>
+        }
       />
       <section aria-labelledby="coord-workspaces">
         <h2 id="coord-workspaces" className="mb-3 text-lg font-semibold">

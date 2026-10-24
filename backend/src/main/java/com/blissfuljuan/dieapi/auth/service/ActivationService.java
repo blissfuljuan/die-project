@@ -12,9 +12,8 @@ import com.blissfuljuan.dieapi.auth.model.VerificationLink;
 import com.blissfuljuan.dieapi.auth.repository.ActivationRepository;
 import com.blissfuljuan.dieapi.auth.view.ActivationCheckView;
 import com.blissfuljuan.dieapi.auth.view.ActivationStatusView;
-import com.blissfuljuan.dieapi.common.util.AfterCommit;
 import com.blissfuljuan.dieapi.common.util.Tokens;
-import com.blissfuljuan.dieapi.mail.service.EmailSender;
+import com.blissfuljuan.dieapi.mail.service.MailQueue;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -44,17 +43,19 @@ public class ActivationService {
     private final PasswordPolicy passwordPolicy;
     private final LoginThrottleService throttle;
     private final TempCredentialService tempCredentials;
-    private final EmailSender mail;
+    private final MailQueue mail;
     private final ApplicationEventPublisher events;
     private final int maxCredentialAttempts;
+    private final int lockMinutes;
     private final int verificationHours;
     private final String frontendBaseUrl;
     private final String dummyHash;
 
     public ActivationService(ActivationRepository repository, TempCredentialRepository credentials, PasswordEncoder encoder, PasswordPolicy passwordPolicy,
                              LoginThrottleService throttle, TempCredentialService tempCredentials,
-                             EmailSender mail, ApplicationEventPublisher events,
-                             @Value("${die.auth.temp-credential-max-attempts:5}") int maxCredentialAttempts,
+                             MailQueue mail, ApplicationEventPublisher events,
+                             @Value("${die.auth.temp-credential-max-attempts:20}") int maxCredentialAttempts,
+                             @Value("${die.auth.temp-credential-lock-minutes:30}") int lockMinutes,
                              @Value("${die.auth.email-verification-hours:24}") int verificationHours,
                              @Value("${die.frontend-base-url:http://localhost:5173}") String frontendBaseUrl) {
         this.repository = repository;
@@ -66,6 +67,7 @@ public class ActivationService {
         this.mail = mail;
         this.events = events;
         this.maxCredentialAttempts = maxCredentialAttempts;
+        this.lockMinutes = lockMinutes;
         this.verificationHours = verificationHours;
         this.frontendBaseUrl = frontendBaseUrl.replaceAll("/+$", "");
         // Burned on unknown identifiers so response time does not reveal whether an account exists.
@@ -79,7 +81,7 @@ public class ActivationService {
         return new ActivationCheckView(p.firstName(), p.lastName(), p.email(), p.emailVerified());
     }
 
-    /** Steps 5-6: set email + new password. Verification email is sent unless the same verified email is kept. */
+    /** Steps 5-6: set email + new password. The verification link is always sent; an already verified address cannot be replaced (ACTIVATION_EMAIL_LOCKED). */
     @Transactional(noRollbackFor = ApiException.class)
     public ActivationStatusView begin(String identifier, String temporaryCredential, String rawEmail,
                              String newPassword, String clientIp) {
@@ -87,31 +89,29 @@ public class ActivationService {
         String email = rawEmail.trim().toLowerCase(Locale.ROOT);
         passwordPolicy.validate(newPassword, List.of(identifier, email, temporaryCredential));
 
-        boolean keepVerified = p.emailVerified() && email.equals(p.email());
-        repository.applyChosenCredentials(p.userId(), encoder.encode(newPassword), email, keepVerified);
+        // A verified address is never replaced here. After an administrator's credential reset the holder of the temporary
+        // secret could otherwise activate with a mailbox of their own; with the address locked, only the real owner's
+        // mailbox can complete activation (the link below always goes to it).
+        boolean sameVerifiedAddress = p.emailVerified() && email.equalsIgnoreCase(p.email());
+        if (p.emailVerified() && !sameVerifiedAddress) {
+            throw ApiException.badRequest(ErrorCode.ACTIVATION_EMAIL_LOCKED,
+                "The email address on this account is already verified and cannot be changed here. Use that address.");
+        }
+
+        // Hashed before the address lookup so a taken address costs the same time as a free one.
+        String newHash = encoder.encode(newPassword);
+        if (repository.emailUsedByAnother(p.userId(), email)) {
+            return emailAlreadyInUse(p, email);
+        }
+
+        repository.applyChosenCredentials(p.userId(), newHash, email, sameVerifiedAddress);
 
         // Any earlier, unused verification link is void now (it may point at a different address).
         repository.deleteUnusedVerificationTokens(p.userId());
 
-        // Replacing the address of an account whose email was already verified is a takeover vector
-        // (e.g. a credential reset followed by activation with another address): record both addresses
-        // and warn the previous owner.
         Map<String, Object> emailDetails = new HashMap<>();
         emailDetails.put("previousEmail", p.email());
         emailDetails.put("newEmail", email);
-        if (p.emailVerified() && p.email() != null && !p.email().equals(email)) {
-            String previous = p.email();
-            String notice = "Hello " + p.firstName() + ",\n\nThe email address of your Document-Implementation "
-                + "Evaluator account is being changed to a different address. If this was not you, contact "
-                + "your administrator immediately.\n";
-            AfterCommit.run("email change notice", () -> mail.send(previous, "Your account email is being changed", notice));
-        }
-
-        if (keepVerified) {
-            tempCredentials.invalidateActive(p.userId(), "ACTIVATED");
-            events.publishEvent(AuditEvent.of(p.userId(), AuditAction.ACCOUNT_ACTIVATED, AuditResource.USER, p.userId().toString(), emailDetails));
-            return new ActivationStatusView(AccountStatus.ACTIVE.name());
-        }
 
         String token = newToken();
         repository.insertVerificationToken(p.userId(), email, sha256(token), verificationHours);
@@ -121,7 +121,21 @@ public class ActivationService {
         String body = "Hello " + p.firstName() + ",\n\nConfirm your email address to finish activating your "
             + "Document-Implementation Evaluator account:\n\n" + link + "\n\nThis link expires in "
             + verificationHours + " hours. If you did not request this, ignore this message.\n";
-        AfterCommit.run("activation email", () -> mail.send(email, "Confirm your email address", body));
+        mail.enqueue(email, "Confirm your email address", body);
+        return new ActivationStatusView("VERIFICATION_REQUIRED");
+    }
+
+    /**
+     * The chosen address belongs to another account. The caller must not learn that (it would reveal who is
+     * registered), so the answer is the same as for a free address and nothing is changed: no password, no address,
+     * no token. The address's owner gets a notice instead, and the attempt is audited.
+     */
+    private ActivationStatusView emailAlreadyInUse(PendingActivation p, String email) {
+        events.publishEvent(AuditEvent.of(p.userId(), AuditAction.ACTIVATION_EMAIL_CONFLICT, AuditResource.USER, p.userId().toString(), Map.of()));
+        String notice = "Someone tried to use this email address to activate a Document-Implementation Evaluator "
+            + "account, but it already belongs to an existing account. No change was made. If this was not you, "
+            + "you can ignore this message.\n";
+        mail.enqueue(email, "Your email address was used in an activation attempt", notice);
         return new ActivationStatusView("VERIFICATION_REQUIRED");
     }
 
@@ -161,6 +175,12 @@ public class ActivationService {
         Optional<PendingActivation> found = repository.findPending(id);
         boolean matches = encoder.matches(secret, found.map(PendingActivation::secretHash).orElse(dummyHash));
 
+        if (found.isPresent() && found.get().lockedAt(OffsetDateTime.now())) {
+            // Locked after too many wrong guesses: even the right secret is refused until the lock lapses.
+            // Further guesses are not counted (they cannot extend the lock), but they still feed the throttle.
+            throttle.record(throttleKey, clientIp, false);
+            throw ApiException.unauthorized(ErrorCode.ACTIVATION_CREDENTIALS_INVALID, INVALID);
+        }
         if (found.isEmpty() || !matches) {
             found.ifPresent(p -> recordCredentialFailure(p));
             throttle.record(throttleKey, clientIp, false);
@@ -179,8 +199,11 @@ public class ActivationService {
     private void recordCredentialFailure(PendingActivation p) {
         int attempts = credentials.incrementFailedAttempts(p.credentialId());
         if (attempts >= maxCredentialAttempts) {
-            tempCredentials.invalidateActive(p.userId(), "LOCKED");
-            events.publishEvent(AuditEvent.of(p.userId(), AuditAction.TEMP_CREDENTIAL_LOCKED, AuditResource.USER, p.userId().toString(), Map.of()));
+            // A timed lock, not an invalidation: anyone who knows a student number can send wrong guesses, and a
+            // permanent burn would force an administrator reset each time.
+            credentials.lockTemporarily(p.credentialId(), lockMinutes);
+            events.publishEvent(AuditEvent.of(p.userId(), AuditAction.TEMP_CREDENTIAL_LOCKED, AuditResource.USER, p.userId().toString(),
+                Map.of("lockMinutes", lockMinutes)));
         }
     }
 

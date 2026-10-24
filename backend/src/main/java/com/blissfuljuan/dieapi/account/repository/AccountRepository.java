@@ -95,10 +95,19 @@ public class AccountRepository {
     public UserPage search(UserRole role, AccountStatus status, String q, int page, int size) {
         StringBuilder where = new StringBuilder(" WHERE 1 = 1");
         Map<String, Object> params = new HashMap<>();
-        if (role != null) { where.append(" AND role = :role"); params.put("role", role.name()); }
-        if (status != null) { where.append(" AND status = :status"); params.put("status", status.name()); }
+        if (role != null) {
+            where.append(" AND role = :role");
+            params.put("role", role.name());
+        }
+        if (status != null) {
+            where.append(" AND status = :status");
+            params.put("status", status.name());
+        }
         if (q != null && !q.isBlank()) {
-            String escaped = q.trim().toLowerCase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+            String escaped = q.trim().toLowerCase()
+                    .replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_");
             where.append("""
                  AND lower(last_name || ' ' || first_name || ' ' || coalesce(email, '') || ' ' ||
                            coalesce(student_number, '')) LIKE :q ESCAPE '\\'
@@ -135,7 +144,9 @@ public class AccountRepository {
     public boolean isActiveWithRole(UUID id, String role) {
         return jdbc.sql("SELECT status, role FROM app_user WHERE id = :id")
             .param("id", id)
-            .query((rs, n) -> AccountStatus.ACTIVE.name().equals(rs.getString("status")) && role.equals(rs.getString("role")))
+            .query((rs, n) ->
+                    AccountStatus.ACTIVE.name().equals(rs.getString("status"))
+                            && role.equals(rs.getString("role")))
             .optional()
             .orElse(false);
     }

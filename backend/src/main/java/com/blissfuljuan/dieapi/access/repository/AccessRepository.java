@@ -69,6 +69,21 @@ public class AccessRepository {
             .param("c", projectId).param("u", userId).query(String.class).optional().map(AccessRepository::teamRoleToProjectRole);
     }
 
+    /** The user's current team role in each of the given projects (projects they are not on are absent). One query. */
+    public java.util.Map<UUID, ProjectRole> currentTeamRoles(UUID userId, java.util.Collection<UUID> projectIds) {
+        java.util.Map<UUID, ProjectRole> out = new java.util.HashMap<>();
+        if (projectIds.isEmpty()) {
+            return out;
+        }
+        jdbc.sql("SELECT project_id, role FROM project_member WHERE user_id = :u AND left_at IS NULL AND project_id IN (:ids)")
+            .param("u", userId).param("ids", projectIds)
+            .query((rs, n) -> {
+                out.put(rs.getObject("project_id", UUID.class), teamRoleToProjectRole(rs.getString("role")));
+                return 0;
+            }).list();
+        return out;
+    }
+
     private static ProjectRole teamRoleToProjectRole(String stored) {
         return switch (stored) {
             case "REPRESENTATIVE" -> ProjectRole.REPRESENTATIVE;

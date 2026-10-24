@@ -4,7 +4,7 @@ import com.blissfuljuan.dieapi.academic.model.EnrollStudent;
 import com.blissfuljuan.dieapi.academic.model.EnrollmentStatus;
 import com.blissfuljuan.dieapi.academic.model.StudentRef;
 import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
-import com.blissfuljuan.dieapi.academic.view.EnrollmentView;
+import com.blissfuljuan.dieapi.academic.view.EnrollmentPage;
 import com.blissfuljuan.dieapi.academic.view.TemporaryCredentialView;
 import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
@@ -14,6 +14,8 @@ import com.blissfuljuan.dieapi.account.service.TempCredentialService;
 import com.blissfuljuan.dieapi.audit.model.AuditAction;
 import com.blissfuljuan.dieapi.audit.model.AuditEvent;
 import com.blissfuljuan.dieapi.audit.model.AuditResource;
+import com.blissfuljuan.dieapi.audit.service.AuditQueryService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
@@ -33,6 +35,9 @@ import static com.blissfuljuan.dieapi.academic.service.ClassInputs.sameText;
 @Service
 public class ClassEnrollmentService {
 
+    /** Largest page size the roster endpoint serves; a roster import is capped at 500 rows, so 200 keeps pages small. */
+    static final int MAX_ROSTER_PAGE = 200;
+
     private final ClassRepository repo;
     private final AccessPolicy policy;
     private final ApplicationEventPublisher events;
@@ -40,10 +45,15 @@ public class ClassEnrollmentService {
     private final EnrollmentRules enrollmentRules;
     private final TempCredentialService tempCredentials;
     private final List<StudentRemovalHandler> removalHandlers;
+    private final AuditQueryService auditTrail;
+    private final int reissuePerCoordinatorPerHour;
+    private final int reissuePerParticipantPerHour;
 
     public ClassEnrollmentService(ClassRepository repo, AccessPolicy policy, ApplicationEventPublisher events, ClassLocks locks,
                                   EnrollmentRules enrollmentRules, TempCredentialService tempCredentials,
-                                  List<StudentRemovalHandler> removalHandlers) {
+                                  List<StudentRemovalHandler> removalHandlers, AuditQueryService auditTrail,
+                                  @Value("${die.roster.reissue-per-coordinator-per-hour:30}") int reissuePerCoordinatorPerHour,
+                                  @Value("${die.roster.reissue-per-participant-per-hour:3}") int reissuePerParticipantPerHour) {
         this.repo = repo;
         this.policy = policy;
         this.events = events;
@@ -51,12 +61,17 @@ public class ClassEnrollmentService {
         this.enrollmentRules = enrollmentRules;
         this.tempCredentials = tempCredentials;
         this.removalHandlers = removalHandlers;
+        this.auditTrail = auditTrail;
+        this.reissuePerCoordinatorPerHour = reissuePerCoordinatorPerHour;
+        this.reissuePerParticipantPerHour = reissuePerParticipantPerHour;
     }
 
     @Transactional(readOnly = true)
-    public List<EnrollmentView> roster(AppUserDetails user, UUID workspaceId, boolean includeRemoved) {
+    public EnrollmentPage roster(AppUserDetails user, UUID workspaceId, boolean includeRemoved, int page, int size) {
         policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_ROSTER);
-        return repo.enrollments(workspaceId, includeRemoved);
+        int p = Math.max(page, 0);
+        int s = Math.min(Math.max(size, 1), MAX_ROSTER_PAGE);
+        return new EnrollmentPage(repo.enrollments(workspaceId, includeRemoved, s, p * s), p, s, repo.countEnrollments(workspaceId, includeRemoved));
     }
 
     @Transactional
@@ -107,6 +122,13 @@ public class ClassEnrollmentService {
         if (student.get().status() != AccountStatus.PENDING_ACTIVATION) {
             throw ApiException.conflict(ErrorCode.ACCOUNT_ALREADY_ACTIVATED,
                 "The account is already activated; use password reset instead");
+        }
+        // Re-issuing hands out a working secret for someone else's account: cap how often one coordinator can do it
+        // and how often it can be done for one participant (counted from the audit trail, so it holds across instances).
+        if (auditTrail.countByActor(user.getId(), AuditAction.TEMP_CREDENTIAL_REISSUED, 60) >= reissuePerCoordinatorPerHour
+            || auditTrail.countForResource(AuditAction.TEMP_CREDENTIAL_REISSUED, AuditResource.USER, participantId.toString(), 60) >= reissuePerParticipantPerHour) {
+            throw ApiException.tooManyRequests(ErrorCode.CREDENTIAL_REISSUE_LIMIT,
+                "Too many temporary credentials were issued recently. Wait a while before issuing another.");
         }
         var issued = tempCredentials.issue(participantId, user.getId());
         events.publishEvent(AuditEvent.of(user.getId(), AuditAction.TEMP_CREDENTIAL_REISSUED, AuditResource.USER, participantId.toString(),

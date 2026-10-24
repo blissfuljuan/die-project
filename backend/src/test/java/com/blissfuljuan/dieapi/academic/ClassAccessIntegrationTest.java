@@ -286,8 +286,8 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.POST, roster, "{\"studentNumber\":\"S-3\",\"lastName\":\"s3\",\"program\":\"BSCS\",\"section\":\"1A\"}"))).isEqualTo(201);
         assertThat(listedCodes(s3)).containsExactly("CS101");
         MvcResult rosterResult = call(i1, HttpMethod.GET, roster, null);
-        assertThat((List<String>) JsonPath.read(body(rosterResult), "$[*].studentNumber")).containsExactlyInAnyOrder("S-1", "S-3");
-        assertThat((List<String>) JsonPath.read(body(rosterResult), "$[?(@.studentNumber=='S-3')].program"))
+        assertThat((List<String>) JsonPath.read(body(rosterResult), "$.items[*].studentNumber")).containsExactlyInAnyOrder("S-1", "S-3");
+        assertThat((List<String>) JsonPath.read(body(rosterResult), "$.items[?(@.studentNumber=='S-3')].program"))
             .containsExactly("BSCS");
 
         assertThat(status(call(i1, HttpMethod.POST, roster, "{\"studentNumber\":\"S-3\",\"lastName\":\"s3\"}"))).as("duplicate").isEqualTo(409);
@@ -300,8 +300,8 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.DELETE, roster + "/" + s3, null))).isEqualTo(204);
         assertThat(status(call(s3, HttpMethod.GET, "/api/v1/workspaces/" + c1, null))).as("removed student loses access").isEqualTo(404);
         assertThat(listedCodes(s3)).isEmpty();
-        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, roster, null)), "$[*].studentNumber")).containsExactly("S-1");
-        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, roster + "?includeRemoved=true", null)), "$[?(@.status=='REMOVED')].studentNumber"))
+        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, roster, null)), "$.items[*].studentNumber")).containsExactly("S-1");
+        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, roster + "?includeRemoved=true", null)), "$.items[?(@.status=='REMOVED')].studentNumber"))
             .containsExactly("S-3");
 
         assertThat(status(call(i1, HttpMethod.POST, roster, "{\"participantId\":\"" + s3 + "\"}"))).as("re-enroll").isEqualTo(201);

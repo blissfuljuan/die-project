@@ -94,7 +94,9 @@ describe('Change password (profile)', () => {
     server.use(http.post(`${API}/auth/password/change`, () => new HttpResponse(null, { status: 204 })))
     renderApp('/me')
     await fill(user)
-    expect(await screen.findByRole('status')).toHaveTextContent(/password has been changed/i)
+    // Other parts of /me can show a loading "status" at the same time, so match the confirmation by its text.
+    const confirmation = await screen.findByText(/password has been changed/i)
+    expect(confirmation.closest('[role="status"]')).not.toBeNull()
     await waitFor(() => expect(screen.getByLabelText('Current password')).toHaveValue(''))
   })
 

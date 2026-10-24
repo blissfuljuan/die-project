@@ -8,6 +8,11 @@ import { AdminDashboard } from '@/features/admin/AdminDashboard'
 import { CoordinatorDashboard } from '@/features/dashboard/CoordinatorDashboard'
 import { ParticipantDashboard } from '@/features/dashboard/ParticipantDashboard'
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
+import { RosterImportPage } from '@/features/roster/RosterImportPage'
+import { RosterPage } from '@/features/roster/RosterPage'
+import { AdminWorkspacesPage } from '@/features/workspaces/AdminWorkspacesPage'
+import { CreateWorkspacePage } from '@/features/workspaces/CreateWorkspacePage'
+import { EditWorkspacePage } from '@/features/workspaces/EditWorkspacePage'
 import { WorkspaceDetailPage } from '@/features/workspaces/WorkspaceDetailPage'
 import { AppShell } from '@/layouts/AppShell'
 import { ComingSoonPage } from '@/pages/ComingSoonPage'
@@ -37,6 +42,12 @@ export function AppRoutes() {
         <Route element={<AppShell />}>
           <Route path="/" element={<RoleHomeRedirect />} />
           <Route path="/me" element={<ProfilePage />} />
+          <Route element={<RequireRole roles={['COORDINATOR', 'ADMIN']} />}>
+            <Route path="/workspaces/new" element={<CreateWorkspacePage />} />
+            <Route path="/workspaces/:workspaceId/edit" element={<EditWorkspacePage />} />
+            <Route path="/workspaces/:workspaceId/roster" element={<RosterPage />} />
+            <Route path="/workspaces/:workspaceId/roster/import" element={<RosterImportPage />} />
+          </Route>
           <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
           <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
 
@@ -49,7 +60,7 @@ export function AppRoutes() {
           <Route element={<RequireRole roles={['ADMIN']} />}>
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/accounts" element={<ComingSoonPage title="Accounts" />} />
-            <Route path="/admin/workspaces" element={<ComingSoonPage title="Project Workspaces" />} />
+            <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />
           </Route>
         </Route>
       </Route>

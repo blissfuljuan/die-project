@@ -2,6 +2,7 @@ package com.blissfuljuan.dieapi.academic.service;
 
 import com.blissfuljuan.dieapi.academic.model.AddCoordinator;
 import com.blissfuljuan.dieapi.academic.repository.ClassRepository;
+import com.blissfuljuan.dieapi.academic.view.CoordinatorCandidate;
 import com.blissfuljuan.dieapi.academic.view.CoordinatorEntry;
 import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.access.service.AccessPolicy;
@@ -33,6 +34,9 @@ import java.util.UUID;
 @Service
 public class ClassInstructorService {
 
+    static final int MIN_CANDIDATE_QUERY = 3;
+    static final int MAX_CANDIDATES = 10;
+
     private final ClassRepository repo;
     private final AccessPolicy policy;
     private final ApplicationEventPublisher events;
@@ -49,6 +53,22 @@ public class ClassInstructorService {
     public List<CoordinatorEntry> list(AppUserDetails user, UUID workspaceId) {
         policy.requireClassManage(user, workspaceId); // coordinators of the workspace and administrators
         return repo.coordinatorEntries(workspaceId);
+    }
+
+    /**
+     * Picker support for "add a coordinator": active coordinator accounts that are not assigned yet, matched by the start of
+     * their email or name. Only people who may add coordinators can ask, a search needs at least 3 characters and at most 10
+     * matches are returned, so this cannot be used to dump the account directory.
+     */
+    @Transactional(readOnly = true)
+    public List<CoordinatorCandidate> candidates(AppUserDetails user, UUID workspaceId, String query) {
+        policy.requireWorkspaceCapability(user, workspaceId, WorkspaceCapability.MANAGE_COORDINATORS);
+        String q = query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT);
+        if (q.length() < MIN_CANDIDATE_QUERY) {
+            return List.of();
+        }
+        String escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+        return repo.coordinatorCandidates(workspaceId, escaped, MAX_CANDIDATES);
     }
 
     @Transactional

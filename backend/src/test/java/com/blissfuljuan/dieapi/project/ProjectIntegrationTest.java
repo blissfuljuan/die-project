@@ -503,11 +503,11 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         project(c2, "TEAM", "Foreign", b1);
         String list = "/api/v1/workspaces/" + c1 + "/projects";
 
-        assertThat((List<String>) JsonPath.read(body(call(a1, HttpMethod.GET, list, null)), "$[*].id")).containsExactly(p1.toString());
-        assertThat((List<String>) JsonPath.read(body(call(a3, HttpMethod.GET, list, null)), "$[*].id")).containsExactly(p2.toString());
-        assertThat((List<Object>) JsonPath.read(body(call(a5, HttpMethod.GET, list, null)), "$")).isEmpty();
-        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, list, null)), "$[*].id")).containsExactlyInAnyOrder(p1.toString(), p2.toString());
-        assertThat((List<String>) JsonPath.read(body(call(admin, HttpMethod.GET, list, null)), "$[*].id")).containsExactlyInAnyOrder(p1.toString(), p2.toString());
+        assertThat((List<String>) JsonPath.read(body(call(a1, HttpMethod.GET, list, null)), "$.items[*].id")).containsExactly(p1.toString());
+        assertThat((List<String>) JsonPath.read(body(call(a3, HttpMethod.GET, list, null)), "$.items[*].id")).containsExactly(p2.toString());
+        assertThat((List<Object>) JsonPath.read(body(call(a5, HttpMethod.GET, list, null)), "$.items")).isEmpty();
+        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, list, null)), "$.items[*].id")).containsExactlyInAnyOrder(p1.toString(), p2.toString());
+        assertThat((List<String>) JsonPath.read(body(call(admin, HttpMethod.GET, list, null)), "$.items[*].id")).containsExactlyInAnyOrder(p1.toString(), p2.toString());
         for (UUID outsider : List.of(i2, b1, out)) {
             assertThat(status(call(outsider, HttpMethod.GET, list, null))).as("list as " + outsider).isEqualTo(404);
         }

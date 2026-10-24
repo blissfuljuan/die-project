@@ -38,12 +38,22 @@ die:
     max-failed-per-identifier: 5
     max-failed-per-ip: 20
     throttle-window-minutes: 15
+    # Distributed guessing cap per identifier across all addresses. Higher than the per-address cap so that a stranger
+    # cannot lock a real user out with a few requests from another address.
+    max-failed-per-identifier-any-address: 30
+    attempt-retention-days: 7    # login_attempt rows older than this are purged hourly
     temp-credential-days: 14
-    temp-credential-max-attempts: 5
+    # Wrong guesses against one temporary credential (any address) before it is locked for lock-minutes. Higher than the
+    # per-address throttle so ordinary typos never lock it; the lock lapses on its own (no admin reset needed).
+    temp-credential-max-attempts: 20
+    temp-credential-lock-minutes: 30
     email-verification-hours: 24
   roster:
     max-rows: 500          # temp credentials are Argon2-hashed per new student, so keep imports class-sized
     max-bytes: 5242880
+    reissue-per-coordinator-per-hour: 30   # temporary-credential re-issues one coordinator may do per hour
+    reissue-per-participant-per-hour: 3    # ... and per participant, whoever does it
+    preview-retention-days: 7   # uncommitted (PREVIEW/CANCELLED) imports and their personal data are purged after this
     max-concurrent-commits: 2   # per API instance; each user can also run only one commit at a time
   credentials:
     # Bulk Argon2 hashing (roster commit) runs on its own small pool, outside any database transaction.
@@ -84,6 +94,8 @@ die:
       batch-size: 100
   frontend-base-url: ${DIE_FRONTEND_BASE_URL:http://localhost:5173}
   mail:
+    # Mail is queued in Postgres (mail_outbox) and sent by a background dispatcher (die.mail.dispatch=background, the
+    # default; 'inline' is for tests).
     # smtp = real delivery (also set spring.mail.* and die.mail.from). log = print emails, including
     # activation/reset links, to the log: DEV ONLY, enabled by the local/test profiles.
     mode: ${DIE_MAIL_MODE:smtp}
@@ -132,7 +144,10 @@ management:
 springdoc:
   api-docs:
     path: /v3/api-docs
+    # Off by default so production does not publish the API surface anonymously; the local profile turns it on.
+    enabled: false
   swagger-ui:
+    enabled: false
     csrf:
       # Swagger UI reads the XSRF-TOKEN cookie and sends it as X-XSRF-TOKEN, so POST/PUT/DELETE "Try it out"
       # calls work. Call GET /api/v1/auth/csrf once first (it sets the cookie).

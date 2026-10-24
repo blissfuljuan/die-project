@@ -2,6 +2,9 @@ package com.blissfuljuan.dieapi.auth;
 
 import com.blissfuljuan.dieapi.PostgresIntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
@@ -22,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CsrfOnRealServerTest extends PostgresIntegrationTest {
 
     @LocalServerPort int port;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired PasswordEncoder encoder;
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -62,5 +67,38 @@ class CsrfOnRealServerTest extends PostgresIntegrationTest {
             HttpResponse.BodyHandlers.ofString());
         assertThat(login.statusCode()).isEqualTo(401);
         assertThat(login.body()).contains("Invalid email or password");   // the controller answered, not the filter chain
+    }
+
+    private static String cookieValue(HttpResponse<?> r, String name) {
+        return r.headers().allValues("Set-Cookie").stream().filter(c -> c.startsWith(name + "=")).findFirst()
+            .map(c -> c.substring(name.length() + 1, c.indexOf(';'))).orElse(null);
+    }
+
+    @Test
+    void theCsrfCookieIsSameSiteLaxAndIsReplacedWhenSigningInAndOut() throws Exception {
+        jdbc.update("""
+            INSERT INTO app_user (role, status, last_name, first_name, email, email_verified_at, password_hash)
+            VALUES ('COORDINATOR', 'ACTIVE', 'Doe', 'Jane', 'rotate@example.edu', now(), ?)
+            """, encoder.encode("correct horse battery staple"));
+        HttpResponse<String> csrf = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/auth/csrf")).GET().build(),
+            HttpResponse.BodyHandlers.ofString());
+        String xsrfHeader = csrf.headers().allValues("Set-Cookie").stream().filter(c -> c.startsWith("XSRF-TOKEN=")).findFirst().orElseThrow();
+        assertThat(xsrfHeader).containsIgnoringCase("SameSite=Lax");
+        String before = cookieValue(csrf, "XSRF-TOKEN");
+
+        HttpResponse<String> login = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/auth/login"))
+            .header("Content-Type", "application/json").header("X-XSRF-TOKEN", before).header("Cookie", "XSRF-TOKEN=" + before)
+            .POST(HttpRequest.BodyPublishers.ofString("{\"email\":\"rotate@example.edu\",\"password\":\"correct horse battery staple\"}")).build(),
+            HttpResponse.BodyHandlers.ofString());
+        assertThat(login.statusCode()).isEqualTo(200);
+        String afterLogin = cookieValue(login, "XSRF-TOKEN");
+        assertThat(afterLogin).isNotNull().isNotEqualTo(before);
+
+        String session = cookieValue(login, "SESSION");
+        HttpResponse<String> logout = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/auth/logout"))
+            .header("X-XSRF-TOKEN", afterLogin).header("Cookie", "XSRF-TOKEN=" + afterLogin + "; SESSION=" + session)
+            .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(logout.statusCode()).isEqualTo(204);
+        assertThat(cookieValue(logout, "XSRF-TOKEN")).isNotNull().isNotEqualTo(afterLogin);
     }
 }

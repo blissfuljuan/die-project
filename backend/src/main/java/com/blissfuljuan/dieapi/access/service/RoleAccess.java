@@ -5,6 +5,9 @@ import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.access.model.SqlScope;
 import com.blissfuljuan.dieapi.account.model.UserRole;
 
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -20,6 +23,18 @@ interface RoleAccess {
 
     /** What this user is to the project (the project is known to exist). */
     ProjectRole projectRole(UUID userId, UUID projectId);
+
+    /**
+     * What this user is to each of several projects of ONE workspace (all known to exist). Implementations answer in one
+     * query; this default asks one by one and exists only so a new role works before it is optimised.
+     */
+    default Map<UUID, ProjectRole> projectRoles(UUID userId, UUID workspaceId, Collection<UUID> projectIds) {
+        Map<UUID, ProjectRole> out = new HashMap<>();
+        for (UUID id : projectIds) {
+            out.put(id, projectRole(userId, id));
+        }
+        return out;
+    }
 
     /** Restricts class listings (alias {@code c}). */
     SqlScope visibleClasses(UUID userId);
