@@ -70,11 +70,11 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
 
     private UUID clazz(String code, UUID instructor, String formation, int min, int max, boolean mayChange) {
         UUID id = jdbc.queryForObject("""
-            INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section,
-                   team_formation, team_min_size, team_max_size, students_may_change_teams)
-            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', ?, ?, ?, ?) RETURNING id
-            """, UUID.class, code, formation, min, max, mayChange);
-        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", id, instructor);
+            WITH c AS (INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section,
+                   team_formation, team_min_size, team_max_size, students_may_change_teams, owner_id)
+            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', ?, ?, ?, ?, ?) RETURNING id)
+            INSERT INTO class_instructor (class_id, user_id) SELECT id, ? FROM c RETURNING class_id
+            """, UUID.class, code, formation, min, max, mayChange, instructor, instructor);
         return id;
     }
 
@@ -503,11 +503,11 @@ class ProjectIntegrationTest extends PostgresIntegrationTest {
         project(c2, "TEAM", "Foreign", b1);
         String list = "/api/v1/workspaces/" + c1 + "/projects";
 
-        assertThat((List<String>) JsonPath.read(body(call(a1, HttpMethod.GET, list, null)), "$[*].id")).containsExactly(p1.toString());
-        assertThat((List<String>) JsonPath.read(body(call(a3, HttpMethod.GET, list, null)), "$[*].id")).containsExactly(p2.toString());
-        assertThat((List<Object>) JsonPath.read(body(call(a5, HttpMethod.GET, list, null)), "$")).isEmpty();
-        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, list, null)), "$[*].id")).containsExactlyInAnyOrder(p1.toString(), p2.toString());
-        assertThat((List<String>) JsonPath.read(body(call(admin, HttpMethod.GET, list, null)), "$[*].id")).containsExactlyInAnyOrder(p1.toString(), p2.toString());
+        assertThat((List<String>) JsonPath.read(body(call(a1, HttpMethod.GET, list, null)), "$.items[*].id")).containsExactly(p1.toString());
+        assertThat((List<String>) JsonPath.read(body(call(a3, HttpMethod.GET, list, null)), "$.items[*].id")).containsExactly(p2.toString());
+        assertThat((List<Object>) JsonPath.read(body(call(a5, HttpMethod.GET, list, null)), "$.items")).isEmpty();
+        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, list, null)), "$.items[*].id")).containsExactlyInAnyOrder(p1.toString(), p2.toString());
+        assertThat((List<String>) JsonPath.read(body(call(admin, HttpMethod.GET, list, null)), "$.items[*].id")).containsExactlyInAnyOrder(p1.toString(), p2.toString());
         for (UUID outsider : List.of(i2, b1, out)) {
             assertThat(status(call(outsider, HttpMethod.GET, list, null))).as("list as " + outsider).isEqualTo(404);
         }

@@ -13,7 +13,10 @@ import com.blissfuljuan.dieapi.project.model.ProjectRow;
 import com.blissfuljuan.dieapi.project.repository.ProjectRepository;
 import com.blissfuljuan.dieapi.project.view.EligibleParticipant;
 import com.blissfuljuan.dieapi.project.view.HistoryEntry;
+import com.blissfuljuan.dieapi.project.view.InvitationView;
 import com.blissfuljuan.dieapi.project.view.MyInvitation;
+import com.blissfuljuan.dieapi.project.view.ProjectPage;
+import com.blissfuljuan.dieapi.project.model.ProjectKind;
 import com.blissfuljuan.dieapi.project.view.ProjectView;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,18 +45,34 @@ public class ProjectQueryService {
         this.views = views;
     }
 
+    /** Largest page the project list serves. */
+    static final int MAX_PAGE_SIZE = 100;
+
+    /**
+     * One page of the workspace's projects. Roles, members and pending invitations are loaded for the whole page with a
+     * constant number of queries (it used to run a few queries per project).
+     */
     @Transactional(readOnly = true)
-    public List<ProjectView> list(AppUserDetails user, UUID workspaceId) {
+    public ProjectPage list(AppUserDetails user, UUID workspaceId, int page, int size) {
         policy.requireClassView(user, workspaceId);
         var cls = classes.peek(workspaceId).orElseThrow(AccessPolicy::classNotFound);
-        List<ProjectRow> rows = repo.list(workspaceId, policy.visibleProjects(user));
-        Map<UUID, List<MemberRow>> members = repo.currentMembersOf(rows.stream().map(ProjectRow::id).toList());
+        int p = Math.max(page, 0);
+        int s = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        var scope = policy.visibleProjects(user);
+        List<ProjectRow> rows = repo.list(workspaceId, scope, s, p * s);
+        List<UUID> ids = rows.stream().map(ProjectRow::id).toList();
+        Map<UUID, List<MemberRow>> members = repo.currentMembersOf(ids);
+        Map<UUID, ProjectRole> roles = policy.projectRoles(user, workspaceId, ids);
+        List<UUID> editableTeams = rows.stream()
+            .filter(r -> r.kind() == ProjectKind.TEAM && roles.getOrDefault(r.id(), ProjectRole.NONE).canEdit())
+            .map(ProjectRow::id).toList();
+        Map<UUID, List<InvitationView>> pending = repo.pendingInvitationsOf(editableTeams);
         List<ProjectView> out = new ArrayList<>();
-        for (ProjectRow p : rows) {
-            ProjectRole role = policy.projectRole(user, p.id());
-            out.add(views.build(p, role, cls, members.getOrDefault(p.id(), List.of())));
+        for (ProjectRow r : rows) {
+            ProjectRole role = roles.getOrDefault(r.id(), ProjectRole.NONE);
+            out.add(views.build(r, role, cls, members.getOrDefault(r.id(), List.of()), pending.getOrDefault(r.id(), List.of())));
         }
-        return out;
+        return new ProjectPage(out, p, s, repo.count(workspaceId, scope));
     }
 
     @Transactional(readOnly = true)

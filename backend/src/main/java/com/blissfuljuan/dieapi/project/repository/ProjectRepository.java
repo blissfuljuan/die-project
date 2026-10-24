@@ -63,10 +63,18 @@ public class ProjectRepository {
             .query(UUID.class).optional();
     }
 
-    public List<ProjectRow> list(UUID workspaceId, SqlScope scope) {
+    /** One page of the workspace's projects the scope allows, oldest first. */
+    public List<ProjectRow> list(UUID workspaceId, SqlScope scope, int limit, int offset) {
         return jdbc.sql("SELECT " + PROJECT_COLUMNS + " FROM project p " + scope.join()
-                + " WHERE p.class_id = :c ORDER BY p.created_at, p.id")
-            .params(scope.params()).param("c", workspaceId).query(ProjectRepository::mapProject).list();
+                + " WHERE p.class_id = :c ORDER BY p.created_at, p.id LIMIT :limit OFFSET :offset")
+            .params(scope.params()).param("c", workspaceId).param("limit", limit).param("offset", offset)
+            .query(ProjectRepository::mapProject).list();
+    }
+
+    /** How many projects of the workspace the scope allows (the total behind {@link #list}). */
+    public long count(UUID workspaceId, SqlScope scope) {
+        return jdbc.sql("SELECT count(*) FROM project p " + scope.join() + " WHERE p.class_id = :c")
+            .params(scope.params()).param("c", workspaceId).query(Long.class).single();
     }
 
     public void updateDetails(UUID id, String title, String description, String teamName) {
@@ -225,6 +233,27 @@ public class ProjectRepository {
                 rs.getString("first_name"), rs.getString("last_name"), rs.getString("status"),
                 rs.getObject("expires_at", OffsetDateTime.class), rs.getObject("created_at", OffsetDateTime.class)))
             .list();
+    }
+
+    /** Live pending invitations of several projects in one query (the listing view needs them for every editable team). */
+    public Map<UUID, List<InvitationView>> pendingInvitationsOf(Collection<UUID> projectIds) {
+        Map<UUID, List<InvitationView>> out = new HashMap<>();
+        if (projectIds.isEmpty()) return out;
+        jdbc.sql("""
+                SELECT i.project_id, i.id, u.id AS student_id, u.first_name, u.last_name, i.status, i.expires_at, i.created_at
+                FROM team_invitation i JOIN app_user u ON u.id = i.invited_user_id
+                WHERE i.project_id IN (:ids) AND i.status = 'PENDING' AND i.expires_at > now()
+                ORDER BY i.created_at, i.id
+                """)
+            .param("ids", projectIds)
+            .query((rs, n) -> {
+                out.computeIfAbsent(rs.getObject("project_id", UUID.class), k -> new ArrayList<>()).add(new InvitationView(
+                    rs.getObject("id", UUID.class), rs.getObject("student_id", UUID.class), rs.getString("first_name"),
+                    rs.getString("last_name"), rs.getString("status"), rs.getObject("expires_at", OffsetDateTime.class),
+                    rs.getObject("created_at", OffsetDateTime.class)));
+                return 0;
+            }).list();
+        return out;
     }
 
     public int livePendingCount(UUID projectId) {

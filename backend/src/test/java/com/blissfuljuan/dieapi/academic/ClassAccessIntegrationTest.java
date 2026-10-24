@@ -47,7 +47,6 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         sessions.clear();
         jdbc.update("DELETE FROM login_attempt");
         jdbc.update("DELETE FROM enrollment");
-        jdbc.update("DELETE FROM class_instructor");
         jdbc.update("DELETE FROM academic_class");
         jdbc.update("DELETE FROM app_user");
         admin = user("admin@x.edu", "ADMIN", "ACTIVE", null);
@@ -75,10 +74,10 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
 
     private UUID clazz(String code, String section, UUID instructor, UUID student) {
         UUID id = jdbc.queryForObject("""
-            INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section)
-            VALUES ('2025-2026', '1st', ?, 'Subject ' || ?, ?) RETURNING id
-            """, UUID.class, code, code, section);
-        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", id, instructor);
+            WITH c AS (INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section, owner_id)
+            VALUES ('2025-2026', '1st', ?, 'Subject ' || ?, ?, ?) RETURNING id)
+            INSERT INTO class_instructor (class_id, user_id) SELECT id, ? FROM c RETURNING class_id
+            """, UUID.class, code, code, section, instructor, instructor);
         jdbc.update("INSERT INTO enrollment (class_id, student_id) VALUES (?, ?)", id, student);
         return id;
     }
@@ -132,7 +131,11 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
             new Op("unenroll", HttpMethod.DELETE, base + "/enrollments/" + s2, null),
             new Op("update", HttpMethod.PATCH, base, "{\"version\":" + version(workspaceId) + ",\"section\":\"HACKED\"}"),
             new Op("archive", HttpMethod.POST, base + "/archive", null),
-            new Op("coordinators", HttpMethod.PUT, base + "/coordinators", "{\"coordinatorIds\":[\"" + i1 + "\"]}"));
+            new Op("coordinators-list", HttpMethod.GET, base + "/coordinators", null),
+            new Op("coordinators-add", HttpMethod.POST, base + "/coordinators", "{\"userId\":\"" + i3 + "\"}"),
+            new Op("coordinators-capabilities", HttpMethod.PATCH, base + "/coordinators/" + i3, "{\"capabilities\":[\"MANAGE_ROSTER\"]}"),
+            new Op("coordinators-remove", HttpMethod.DELETE, base + "/coordinators/" + i3, null),
+            new Op("owner-transfer", HttpMethod.PUT, base + "/owner", "{\"userId\":\"" + i3 + "\"}"));
     }
 
     // ---- visibility ----
@@ -171,10 +174,8 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         long versionBefore = version(c2);
         for (UUID outsider : List.of(i1, i3, s1, s3)) {
             for (Op op : manageOps(c2)) {
-                // Changing coordinators is admin-only, gated by role before any class lookup.
-                int expected = op.name().equals("coordinators") ? 403 : 404;
                 assertThat(status(call(outsider, op.method(), op.path(), op.body())))
-                    .as("%s on foreign class as %s", op.name(), outsider).isEqualTo(expected);
+                    .as("%s on foreign class as %s", op.name(), outsider).isEqualTo(404);
             }
         }
         for (Op op : manageOps(c2)) {
@@ -235,17 +236,21 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.POST, "/api/v1/workspaces", body))).isEqualTo(409);
 
         String adminBody = body.replace("CS201", "CS202");
-        assertThat(status(call(admin, HttpMethod.POST, "/api/v1/workspaces", adminBody))).as("admin w/o coordinators").isEqualTo(400);
+        assertThat(status(call(admin, HttpMethod.POST, "/api/v1/workspaces", adminBody))).as("admin w/o owner").isEqualTo(400);
+        assertThat(status(call(admin, HttpMethod.POST, "/api/v1/workspaces",
+            adminBody.replace("}", ",\"coordinatorIds\":[\"" + i2 + "\"]}")))).as("coordinatorIds do not replace ownerId").isEqualTo(400);
         MvcResult byAdmin = call(admin, HttpMethod.POST, "/api/v1/workspaces",
-            adminBody.replace("}", ",\"coordinatorIds\":[\"" + i2 + "\"]}"));
+            adminBody.replace("}", ",\"ownerId\":\"" + i2 + "\",\"coordinatorIds\":[\"" + i3 + "\"]}"));
         assertThat(status(byAdmin)).isEqualTo(201);
+        assertThat((String) JsonPath.read(body(byAdmin), "$.ownerId")).isEqualTo(i2.toString());
+        assertThat((List<String>) JsonPath.read(body(byAdmin), "$.coordinators[*].id")).containsExactlyInAnyOrder(i2.toString(), i3.toString());
         assertThat(listedCodes(i2)).contains("CS202");
         assertThat(listedCodes(admin)).contains("CS202");
 
-        String studentAsInstructor = body.replace("CS201", "CS203").replace("}", ",\"coordinatorIds\":[\"" + s1 + "\"]}");
+        String studentAsInstructor = body.replace("CS201", "CS203").replace("}", ",\"ownerId\":\"" + s1 + "\"}");
         assertThat(status(call(admin, HttpMethod.POST, "/api/v1/workspaces", studentAsInstructor))).isEqualTo(400);
         assertThat(status(call(admin, HttpMethod.POST, "/api/v1/workspaces",
-            body.replace("CS201", "CS204").replace("}", ",\"coordinatorIds\":[\"" + goneInstructor + "\"]}")))).isEqualTo(400);
+            body.replace("CS201", "CS204").replace("}", ",\"ownerId\":\"" + goneInstructor + "\"}")))).isEqualTo(400);
 
         assertThat(status(call(i1, HttpMethod.POST, "/api/v1/workspaces", body.replace("CS201", "CS205").replace("PARTICIPANT_FORMED", "ANARCHY")))).isEqualTo(400);
         assertThat(status(call(i1, HttpMethod.POST, "/api/v1/workspaces", body.replace("CS201", "CS206").replace("\"teamMaxSize\":4", "\"teamMaxSize\":1")))).isEqualTo(400);
@@ -272,35 +277,6 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.PATCH, path, "{\"version\":" + version(c1) + ",\"teamMinSize\":9,\"teamMaxSize\":2}"))).isEqualTo(400);
     }
 
-    // ---- coordinators ----
-
-    @Test
-    void instructorAssignmentIsRestrictedToRealActiveInstructorsAndNeverLeavesAClassUnstaffed() throws Exception {
-        String path = "/api/v1/workspaces/" + c1 + "/coordinators";
-        // Changing who teaches a class is administrative: coordinators (even of that class) cannot do it.
-        assertThat(status(call(i1, HttpMethod.PUT, path, "{\"coordinatorIds\":[\"" + i1 + "\",\"" + i2 + "\"]}"))).isEqualTo(403);
-        assertThat(status(call(i2, HttpMethod.PUT, path, "{\"coordinatorIds\":[\"" + i2 + "\"]}"))).isEqualTo(403);
-        assertThat(jdbc.queryForList("SELECT user_id FROM class_instructor WHERE class_id = ?", UUID.class, c1)).containsExactly(i1);
-
-        assertThat(status(call(admin, HttpMethod.PUT, path, "{\"coordinatorIds\":[\"" + i1 + "\",\"" + i2 + "\"]}"))).isEqualTo(204);
-        assertThat(listedCodes(i2)).containsExactlyInAnyOrder("CS101", "CS102");
-
-        for (String bad : List.of("[]", "[\"" + s1 + "\"]", "[\"" + admin + "\"]", "[\"" + goneInstructor + "\"]",
-                "[\"" + UUID.randomUUID() + "\"]")) {
-            assertThat(status(call(admin, HttpMethod.PUT, path, "{\"coordinatorIds\":" + bad + "}"))).as(bad).isEqualTo(400);
-        }
-        assertThat(jdbc.queryForList("SELECT user_id FROM class_instructor WHERE class_id = ?", UUID.class, c1))
-            .containsExactlyInAnyOrder(i1, i2);
-
-        // The admin hands the class to i2; i1 loses access to it.
-        assertThat(status(call(admin, HttpMethod.PUT, path, "{\"coordinatorIds\":[\"" + i2 + "\"]}"))).isEqualTo(204);
-        assertThat(status(call(i1, HttpMethod.GET, "/api/v1/workspaces/" + c1, null))).isEqualTo(404);
-        assertThat(listedCodes(i1)).isEmpty();
-        assertThat(status(call(admin, HttpMethod.PUT, path, "{\"coordinatorIds\":[\"" + i3 + "\"]}"))).isEqualTo(204);
-        assertThat(listedCodes(i3)).containsExactly("CS101");
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'CLASS_INSTRUCTORS_CHANGED'", Integer.class)).isEqualTo(3);
-    }
-
     // ---- enrollment ----
 
     @Test
@@ -310,8 +286,8 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.POST, roster, "{\"studentNumber\":\"S-3\",\"lastName\":\"s3\",\"program\":\"BSCS\",\"section\":\"1A\"}"))).isEqualTo(201);
         assertThat(listedCodes(s3)).containsExactly("CS101");
         MvcResult rosterResult = call(i1, HttpMethod.GET, roster, null);
-        assertThat((List<String>) JsonPath.read(body(rosterResult), "$[*].studentNumber")).containsExactlyInAnyOrder("S-1", "S-3");
-        assertThat((List<String>) JsonPath.read(body(rosterResult), "$[?(@.studentNumber=='S-3')].program"))
+        assertThat((List<String>) JsonPath.read(body(rosterResult), "$.items[*].studentNumber")).containsExactlyInAnyOrder("S-1", "S-3");
+        assertThat((List<String>) JsonPath.read(body(rosterResult), "$.items[?(@.studentNumber=='S-3')].program"))
             .containsExactly("BSCS");
 
         assertThat(status(call(i1, HttpMethod.POST, roster, "{\"studentNumber\":\"S-3\",\"lastName\":\"s3\"}"))).as("duplicate").isEqualTo(409);
@@ -324,8 +300,8 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.DELETE, roster + "/" + s3, null))).isEqualTo(204);
         assertThat(status(call(s3, HttpMethod.GET, "/api/v1/workspaces/" + c1, null))).as("removed student loses access").isEqualTo(404);
         assertThat(listedCodes(s3)).isEmpty();
-        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, roster, null)), "$[*].studentNumber")).containsExactly("S-1");
-        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, roster + "?includeRemoved=true", null)), "$[?(@.status=='REMOVED')].studentNumber"))
+        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, roster, null)), "$.items[*].studentNumber")).containsExactly("S-1");
+        assertThat((List<String>) JsonPath.read(body(call(i1, HttpMethod.GET, roster + "?includeRemoved=true", null)), "$.items[?(@.status=='REMOVED')].studentNumber"))
             .containsExactly("S-3");
 
         assertThat(status(call(i1, HttpMethod.POST, roster, "{\"participantId\":\"" + s3 + "\"}"))).as("re-enroll").isEqualTo(201);
@@ -350,12 +326,8 @@ class ClassAccessIntegrationTest extends PostgresIntegrationTest {
         assertThat(status(call(i1, HttpMethod.POST, base + "/archive", null))).as("idempotent").isEqualTo(200);
 
         for (Op op : manageOps(c1)) {
-            if (op.name().equals("roster") || op.name().equals("archive")) continue;
-            if (op.name().equals("coordinators")) {
-                assertThat(status(call(i1, op.method(), op.path(), op.body()))).as("coordinators may not change coordinators").isEqualTo(403);
-                assertThat(status(call(admin, op.method(), op.path(), op.body()))).as("archived: admin " + op.name()).isEqualTo(409);
-                continue;
-            }
+            // reads, the idempotent archive and the ownership transfer (owner recovery) stay possible while archived
+            if (List.of("roster", "archive", "coordinators-list", "owner-transfer").contains(op.name())) continue;
             assertThat(status(call(i1, op.method(), op.path(), op.body()))).as("archived: " + op.name()).isEqualTo(409);
         }
         assertThat(status(call(i1, HttpMethod.GET, base + "/enrollments", null))).isEqualTo(200);

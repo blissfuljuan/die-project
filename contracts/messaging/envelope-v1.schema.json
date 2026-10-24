@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://die.local/contracts/messaging/envelope-v1.schema.json",
+  "title": "DIE internal message envelope, version 1",
+  "description": "Every message on the internal RabbitMQ topology is one UTF-8 JSON document of this shape. The payload is validated per message type by the 'allOf' branches below. Any breaking change creates envelope-v2.schema.json and a new envelopeVersion; consumers send unknown versions to the DLQ.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["envelopeVersion", "messageId", "correlationId", "type", "createdAt", "attempt", "payload"],
+  "properties": {
+    "envelopeVersion": { "const": 1 },
+    "messageId": { "$ref": "#/$defs/uuid", "description": "Identity of this message. Redeliveries and retries keep it; consumers dedupe on it." },
+    "correlationId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,64}$", "description": "The API request's X-Request-Id; copied unchanged into every derived message and log line." },
+    "type": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$", "description": "Message type, e.g. test.ping." },
+    "createdAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$", "description": "UTC instant of creation (first publication)." },
+    "attempt": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Delivery attempt, starting at 1. A consumer that retries republishes the message with attempt + 1." },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "test.ping" } }, "required": ["type"] },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/testPing" } } } },
+    { "if": { "properties": { "type": { "const": "test.analyze" } }, "required": ["type"] },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/testPing" } } } },
+    { "if": { "properties": { "type": { "const": "test.analyze.result" } }, "required": ["type"] },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/testOutcome" } } } },
+    { "if": { "properties": { "type": { "const": "test.progress" } }, "required": ["type"] },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/testProgress" } } } },
+    { "if": { "properties": { "type": { "const": "test.result" } }, "required": ["type"] },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/testOutcome" } } } }
+  ],
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "testPing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["testJobId"],
+      "properties": {
+        "testJobId": { "$ref": "#/$defs/uuid" },
+        "note": { "type": ["string", "null"], "maxLength": 200 },
+        "simulateFailure": { "type": "boolean", "description": "Operations test hook: the document worker fails every attempt so retry exhaustion and the DLQ can be demonstrated." }
+      }
+    },
+    "testProgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["testJobId", "stage", "worker"],
+      "properties": {
+        "testJobId": { "$ref": "#/$defs/uuid" },
+        "stage": { "type": "string", "maxLength": 64 },
+        "worker": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "testOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["testJobId", "outcome", "worker"],
+      "properties": {
+        "testJobId": { "$ref": "#/$defs/uuid" },
+        "outcome": { "enum": ["SUCCEEDED", "FAILED"] },
+        "worker": { "type": "string", "maxLength": 64 },
+        "workers": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 64 } },
+        "reason": { "type": ["string", "null"], "maxLength": 500 },
+        "result": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "pong": { "type": "boolean" },
+            "noteLength": { "type": "integer", "minimum": 0 },
+            "noteSha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    }
+  }
+}

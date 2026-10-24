@@ -134,3 +134,16 @@ describe('CSRF handling', () => {
     expect(readCsrfCookie('a=1')).toBeUndefined()
   })
 })
+
+describe('file uploads', () => {
+  it('sends a FormData body untouched, without a JSON content type', async () => {
+    const form = new FormData()
+    form.append('file', new Blob(['a,b'], { type: 'text/csv' }), 'roster.csv')
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ ok: true }))
+    await client({ fetchImpl, readCsrf: () => 'token' }).post('/upload', form)
+    const init = fetchImpl.mock.calls[0]?.[1]
+    expect(init?.body).toBe(form)
+    expect((init?.headers as Record<string, string>)['Content-Type']).toBeUndefined()
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('token')
+  })
+})

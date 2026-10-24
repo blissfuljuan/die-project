@@ -161,7 +161,7 @@ class P1AcceptanceTest extends PostgresIntegrationTest {
         String quinTemp = first(body(committed), "$.credentials[?(@.studentNumber=='2025-0003')].temporaryCredential");
 
         MvcResult roster = ok(send(instructor, HttpMethod.GET, classUrl + "/enrollments", null));
-        assertThat((List<String>) JsonPath.read(body(roster), "$[*].studentNumber"))
+        assertThat((List<String>) JsonPath.read(body(roster), "$.items[*].studentNumber"))
             .containsExactlyInAnyOrder("2025-0001", "2025-0002", "2025-0003", "2025-0004");
 
         // ===== Criterion 2 for students: both creation paths (admin-created and imported) =====
@@ -193,10 +193,10 @@ class P1AcceptanceTest extends PostgresIntegrationTest {
         assertThat((List<String>) JsonPath.read(body(solo), "$.members[*].firstName")).containsExactly("Lea");
 
         // Everyone sees exactly what they should.
-        assertThat((List<String>) JsonPath.read(body(ok(send(instructor, HttpMethod.GET, classUrl + "/projects", null))), "$[*].title"))
+        assertThat((List<String>) JsonPath.read(body(ok(send(instructor, HttpMethod.GET, classUrl + "/projects", null))), "$.items[*].title"))
             .containsExactlyInAnyOrder("Capstone", "Personal project");
-        assertThat((List<String>) JsonPath.read(body(ok(send(quin, HttpMethod.GET, classUrl + "/projects", null))), "$[*].title")).containsExactly("Capstone");
-        assertThat((List<Object>) JsonPath.read(body(ok(send(ana, HttpMethod.GET, classUrl + "/projects", null))), "$")).isEmpty();
+        assertThat((List<String>) JsonPath.read(body(ok(send(quin, HttpMethod.GET, classUrl + "/projects", null))), "$.items[*].title")).containsExactly("Capstone");
+        assertThat((List<Object>) JsonPath.read(body(ok(send(ana, HttpMethod.GET, classUrl + "/projects", null))), "$.items")).isEmpty();
         assertThat(status(send(ana, HttpMethod.GET, "/api/v1/projects/" + teamId, null))).as("classmate off the team").isEqualTo(404);
 
         // The paper trail exists and never contains secrets.

@@ -1,0 +1,212 @@
+# Render Blueprint for DIE (Document-Implementation Evaluator). Documentation: docs/ops/deployment.md.
+#
+#   die-frontend          static site   React SPA; rewrites /api/* to die-api (the browser sees ONE origin: no CORS, first-party cookies)
+#   die-api               web service   Spring Boot (Docker). Health check = liveness; readiness (Postgres + RabbitMQ) is /actuator/health/readiness
+#   die-rabbitmq          private svc   RabbitMQ 3.13 with a persistent disk. SINGLE BROKER: see "Availability" in docs/ops/deployment.md
+#   die-orchestrator      private svc   Java orchestration worker (private service so the API can read its health endpoint)
+#   die-document-worker   private svc   Python document-analysis worker (same reason)
+#   Postgres              NOT created here: Supabase (plain Postgres). Connection values are secrets entered in the dashboard (sync: false).
+#
+# All services share one region: Render private networking only connects services in the same region (and workspace).
+# Values marked "sync: false" are prompted for when the Blueprint is first applied and never stored in this file.
+# Values that need your own service URL (DIE_FRONTEND_BASE_URL, the /api rewrite below) assume the default
+# https://<service-name>.onrender.com addresses; change them if Render gives you different names or you add a custom domain.
+
+envVarGroups:
+  # Shared by the API, the broker and both workers. The password is generated once by Render (never in git) and satisfies
+  # ProductionSafetyCheck (>= 16 characters, not a default).
+  - name: die-broker
+    envVars:
+      - key: RABBITMQ_USER
+        value: die
+      - key: RABBITMQ_PASSWORD
+        generateValue: true
+
+services:
+  # ---------------------------------------------------------------- API
+  - type: web
+    name: die-api
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./infra/render/api.Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/liveness
+    autoDeployTrigger: checksPass          # deploy only after the GitHub checks (.github/workflows/ci.yml) are green
+    buildFilter:
+      paths:
+        - backend/**
+        - contracts/**
+        - infra/render/api.Dockerfile
+    envVars:
+      - fromGroup: die-broker
+      # Production profile: NOT "local". json-logs = one JSON object per log line (correlation id = requestId field).
+      - key: SPRING_PROFILES_ACTIVE
+        value: json-logs
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      # --- Supabase Postgres: two different roles (see docs/ops/deployment.md). Use the Supavisor SESSION pooler or the direct
+      # connection string for DB_URL (jdbc:postgresql://HOST:5432/postgres?sslmode=require); transaction-mode pooling breaks Flyway.
+      - key: DB_URL
+        sync: false
+      - key: DB_APP_USER
+        sync: false
+      - key: DB_APP_PASSWORD
+        sync: false
+      - key: DB_MIGRATOR_USER
+        sync: false
+      - key: DB_MIGRATOR_PASSWORD
+        sync: false
+      - key: DB_POOL_SIZE
+        value: "8"
+      # --- RabbitMQ (private service in the same region)
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: die-rabbitmq
+          property: host
+      # --- worker health endpoints for GET /api/v1/ops/health (host:port is expanded to http://host:port/health/ready)
+      - key: DIE_OPS_ORCHESTRATOR_HEALTH_URL
+        fromService:
+          type: pserv
+          name: die-orchestrator
+          property: hostport
+      - key: DIE_OPS_DOCUMENT_WORKER_HEALTH_URL
+        fromService:
+          type: pserv
+          name: die-document-worker
+          property: hostport
+      # --- links in emails point here
+      - key: DIE_FRONTEND_BASE_URL
+        sync: false                          # e.g. https://die-frontend.onrender.com
+      # --- mail: production must use smtp (ProductionSafetyCheck refuses log mode)
+      - key: DIE_MAIL_MODE
+        value: smtp
+      - key: DIE_MAIL_FROM
+        sync: false
+      - key: SPRING_MAIL_HOST
+        sync: false
+      - key: SPRING_MAIL_PORT
+        value: "587"
+      - key: SPRING_MAIL_USERNAME
+        sync: false
+      - key: SPRING_MAIL_PASSWORD
+        sync: false
+      - key: SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH
+        value: "true"
+      - key: SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE
+        value: "true"
+      # --- first administrator: fill in for the FIRST deploy only, then delete both values (admin is created only if none exists)
+      - key: DIE_BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: DIE_BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      # --- hardening: no public API documentation in production
+      - key: SPRINGDOC_API_DOCS_ENABLED
+        value: "false"
+      - key: SPRINGDOC_SWAGGER_UI_ENABLED
+        value: "false"
+      - key: DIE_OPS_STALE_JOB_SECONDS
+        value: "900"
+
+  # ---------------------------------------------------------------- RabbitMQ (single node)
+  - type: pserv
+    name: die-rabbitmq
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./infra/render/rabbitmq.Dockerfile
+    dockerContext: .
+    buildFilter:
+      paths:
+        - infra/rabbitmq/**
+        - infra/render/rabbitmq.Dockerfile
+    envVars:
+      - fromGroup: die-broker          # RABBITMQ_USER / RABBITMQ_PASSWORD; infra/render/rabbitmq.Dockerfile maps them to RABBITMQ_DEFAULT_*
+    disk:
+      name: rabbitmq-data
+      mountPath: /var/lib/rabbitmq
+      sizeGB: 5
+
+  # ---------------------------------------------------------------- workers
+  - type: pserv
+    name: die-orchestrator
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./infra/render/orchestrator.Dockerfile
+    dockerContext: .
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - workers/orchestrator/**
+        - contracts/**
+        - infra/render/orchestrator.Dockerfile
+    envVars:
+      - fromGroup: die-broker
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: die-rabbitmq
+          property: host
+      - key: HEALTH_PORT
+        value: "8081"
+
+  - type: pserv
+    name: die-document-worker
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./infra/render/document-worker.Dockerfile
+    dockerContext: .
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - workers/document-analysis/**
+        - contracts/**
+        - infra/render/document-worker.Dockerfile
+    envVars:
+      - fromGroup: die-broker
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: die-rabbitmq
+          property: host
+      - key: HEALTH_PORT
+        value: "8082"
+
+  # ---------------------------------------------------------------- frontend
+  - type: web
+    name: die-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - frontend/**
+    # Same-site decision (CLAUDE.md "frontend/API same-site + CORS decision for Render"): the SPA is served from this static
+    # site and /api/* is proxied by Render to the API, so the browser only ever talks to ONE origin. Session and CSRF cookies are
+    # first-party, SameSite=Lax works, and no CORS configuration exists on the API. The SPA calls relative /api/v1/... (no
+    # VITE_API_BASE_URL). Rewrite rules are evaluated in order: the API rule must come before the SPA fallback.
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://die-api.onrender.com/api/*      # CHANGE if the API gets a different onrender.com name / custom domain
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable

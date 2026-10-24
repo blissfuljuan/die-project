@@ -17,6 +17,8 @@ export interface RequestOptions {
   timeoutMs?: number
   /** Optional runtime validation of the JSON body (e.g. `schema.parse`). */
   parse?: (data: unknown) => unknown
+  /** Internal: set after the single CSRF-token retry. */
+  csrfRetried?: boolean
 }
 
 type VerbOptions = Omit<RequestOptions, 'method' | 'body'>
@@ -45,6 +47,7 @@ export class ApiClient {
   get<T = unknown>(path: string, options: VerbOptions = {}) {
     return this.request<T>(path, { ...options, method: 'GET' })
   }
+  /** `body` may be a FormData (file upload) or any JSON-serialisable value. */
   post<T = unknown>(path: string, body?: unknown, options: VerbOptions = {}) {
     return this.request<T>(path, { ...options, method: 'POST', body })
   }
@@ -75,13 +78,27 @@ export class ApiClient {
       if (token) headers[CSRF_HEADER] = token
     }
 
-    let body: string | undefined
-    if (options.body !== undefined) {
+    let body: string | FormData | undefined
+    if (options.body instanceof FormData) {
+      // A file upload: the browser adds the multipart Content-Type (with its boundary) itself.
+      body = options.body
+    } else if (options.body !== undefined) {
       body = JSON.stringify(options.body)
       headers['Content-Type'] ??= 'application/json'
     }
 
-    const response = await this.send(this.url(path), { method, headers, body }, options)
+    let response = await this.send(this.url(path), { method, headers, body }, options)
+
+    // A stale or rotated CSRF token (e.g. after sign-in or sign-out): fetch a fresh one and retry once.
+    if (response.status === 403 && isMutating(method) && !options.csrfRetried) {
+      const problem = await toApiError(response.clone())
+      if (problem.code === 'CSRF_TOKEN_INVALID') {
+        const fresh = await this.request<{ token?: string }>(CSRF_ENDPOINT, { method: 'GET', signal: options.signal })
+        const token = this.readCsrf() ?? fresh?.token
+        if (token) headers[CSRF_HEADER] = token
+        response = await this.send(this.url(path), { method, headers, body }, { ...options, csrfRetried: true })
+      }
+    }
 
     if (!response.ok) throw await toApiError(response)
     if (response.status === 204) return undefined as T

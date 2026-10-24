@@ -4,7 +4,7 @@ import java.util.Locale;
 
 /** Kind of resource an audit row is about. {@link #value()} is the stored {@code resource_type} string. */
 public enum AuditResource {
-    CLASS, USER, PROJECT, AUTH;
+    CLASS, USER, PROJECT, AUTH, TEST_JOB;
 
     public String value() {
         return name().toLowerCase(Locale.ROOT);

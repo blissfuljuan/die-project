@@ -2,12 +2,15 @@ package com.blissfuljuan.dieapi.access.service;
 
 import com.blissfuljuan.dieapi.access.model.ProjectRole;
 import com.blissfuljuan.dieapi.access.model.SqlScope;
+import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.access.repository.AccessRepository;
 import com.blissfuljuan.dieapi.auth.model.AppUserDetails;
 import com.blissfuljuan.dieapi.common.exception.ApiException;
 import com.blissfuljuan.dieapi.common.exception.ErrorCode;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
 
 /** Who may see or change a project. Outsiders and classmates who are not on the team get the same 404 as for a missing project. */
@@ -16,10 +19,12 @@ class ProjectAccess {
 
     private final AccessRepository repo;
     private final RoleAccessRegistry roles;
+    private final WorkspaceCapabilityAccess capabilities;
 
-    ProjectAccess(AccessRepository repo, RoleAccessRegistry roles) {
+    ProjectAccess(AccessRepository repo, RoleAccessRegistry roles, WorkspaceCapabilityAccess capabilities) {
         this.repo = repo;
         this.roles = roles;
+        this.capabilities = capabilities;
     }
 
     ProjectRole projectRole(AppUserDetails user, UUID projectId) {
@@ -27,6 +32,11 @@ class ProjectAccess {
             return ProjectRole.NONE;
         }
         return roles.forRole(user.role()).projectRole(user.getId(), projectId);
+    }
+
+    /** Roles for several projects of one workspace in one go (used by listings; a project the user cannot see is NONE). */
+    Map<UUID, ProjectRole> projectRoles(AppUserDetails user, UUID workspaceId, Collection<UUID> projectIds) {
+        return roles.forRole(user.role()).projectRoles(user.getId(), workspaceId, projectIds);
     }
 
     /** Caller may read the project (staff of its class, current team members). Otherwise 404. */
@@ -44,6 +54,7 @@ class ProjectAccess {
         if (!role.canEdit()) {
             throw AccessPolicy.accessDenied();
         }
+        requireProjectsCapabilityForStaff(user, projectId, role);
         return role;
     }
 
@@ -53,7 +64,16 @@ class ProjectAccess {
         if (!role.isStaff()) {
             throw AccessPolicy.accessDenied();
         }
+        requireProjectsCapabilityForStaff(user, projectId, role);
         return role;
+    }
+
+    /** Coordinators (STAFF) administer projects only with MANAGE_PROJECTS (the Owner has it); administrators are exempt. */
+    private void requireProjectsCapabilityForStaff(AppUserDetails user, UUID projectId, ProjectRole role) {
+        if (role == ProjectRole.STAFF
+            && capabilities.coordinatorLacksInProjectWorkspace(user, projectId, WorkspaceCapability.MANAGE_PROJECTS)) {
+            throw AccessPolicy.accessDenied();
+        }
     }
 
     /** Content access: view plus a role that may read content. Administrators get the 404 outsiders get. */

@@ -17,5 +17,5 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
     },
   },
-  { files: ['src/components/ui/**'], rules: { 'react-refresh/only-export-components': 'off' } },
+  { files: ['src/components/ui/**', 'src/test/**'], rules: { 'react-refresh/only-export-components': 'off' } },
 )

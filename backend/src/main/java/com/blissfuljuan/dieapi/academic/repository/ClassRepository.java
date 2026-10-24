@@ -11,11 +11,15 @@ import com.blissfuljuan.dieapi.account.model.UserRole;
 import com.blissfuljuan.dieapi.academic.view.ClassPage;
 import com.blissfuljuan.dieapi.academic.view.ClassView;
 import com.blissfuljuan.dieapi.academic.view.ClassView.CoordinatorRef;
+import com.blissfuljuan.dieapi.academic.view.CoordinatorCandidate;
+import com.blissfuljuan.dieapi.academic.view.CoordinatorEntry;
+import com.blissfuljuan.dieapi.access.model.WorkspaceCapability;
 import com.blissfuljuan.dieapi.academic.view.EnrollmentView;
 import com.blissfuljuan.dieapi.access.model.SqlScope;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.time.OffsetDateTime;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
@@ -27,7 +31,7 @@ public class ClassRepository {
 
     private static final String CLASS_COLUMNS = """
         c.id, c.academic_year, c.semester, c.subject_code, c.subject_name, c.section, c.status,
-        c.team_formation, c.team_min_size, c.team_max_size, c.students_may_change_teams, c.version,
+        c.team_formation, c.team_min_size, c.team_max_size, c.students_may_change_teams, c.version, c.owner_id,
         (SELECT count(*) FROM enrollment e WHERE e.class_id = c.id AND e.status = 'ENROLLED') AS enrolled_count
         """;
 
@@ -42,7 +46,7 @@ public class ClassRepository {
             rs.getString("semester"), rs.getString("subject_code"), rs.getString("subject_name"),
             rs.getString("section"), rs.getString("status"), rs.getString("team_formation"),
             rs.getInt("team_min_size"), rs.getInt("team_max_size"), rs.getBoolean("students_may_change_teams"),
-            rs.getInt("enrolled_count"), rs.getLong("version"), List.of());
+            rs.getInt("enrolled_count"), rs.getLong("version"), rs.getObject("owner_id", UUID.class), List.of(), List.of());
     }
 
     // ---- classes ----
@@ -97,16 +101,17 @@ public class ClassRepository {
             .optional();
     }
 
-    public UUID insert(NewClass c) {
+    /** Inserts the workspace; the Owner must be inserted as a coordinator in the same transaction (deferred FK). */
+    public UUID insert(NewClass c, UUID ownerId) {
         return jdbc.sql("""
                 INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section,
-                       team_formation, team_min_size, team_max_size, students_may_change_teams, created_by)
-                VALUES (:y, :sem, :code, :name, :sec, :tf, :min, :max, :chg, :by) RETURNING id
+                       team_formation, team_min_size, team_max_size, students_may_change_teams, created_by, owner_id)
+                VALUES (:y, :sem, :code, :name, :sec, :tf, :min, :max, :chg, :by, :owner) RETURNING id
                 """)
             .param("y", c.academicYear()).param("sem", c.semester()).param("code", c.subjectCode())
             .param("name", c.subjectName()).param("sec", c.section()).param("tf", c.teamFormation().name())
             .param("min", c.teamMinSize()).param("max", c.teamMaxSize())
-            .param("chg", c.participantsMayChangeTeams()).param("by", c.createdBy())
+            .param("chg", c.participantsMayChangeTeams()).param("by", c.createdBy()).param("owner", ownerId)
             .query(UUID.class).single();
     }
 
@@ -132,23 +137,110 @@ public class ClassRepository {
 
     // ---- coordinators ----
 
-    public List<UUID> coordinatorIds(UUID workspaceId) {
-        return jdbc.sql("SELECT user_id FROM class_instructor WHERE class_id = :c ORDER BY user_id")
-            .param("c", workspaceId).query(UUID.class).list();
+    public void insertCoordinator(UUID workspaceId, UUID userId, Collection<WorkspaceCapability> capabilities) {
+        jdbc.sql("INSERT INTO class_instructor (class_id, user_id, capabilities) VALUES (:c, :u, CAST(:caps AS text[]))")
+            .param("c", workspaceId).param("u", userId).param("caps", names(capabilities)).update();
     }
 
-    public void replaceInstructors(UUID workspaceId, Collection<UUID> coordinatorIds) {
-        jdbc.sql("DELETE FROM class_instructor WHERE class_id = :c").param("c", workspaceId).update();
-        for (UUID id : coordinatorIds) {
-            jdbc.sql("INSERT INTO class_instructor (class_id, user_id) VALUES (:c, :u)")
-                .param("c", workspaceId).param("u", id).update();
-        }
+    public boolean isAssigned(UUID workspaceId, UUID userId) {
+        return jdbc.sql("SELECT 1 FROM class_instructor WHERE class_id = :c AND user_id = :u")
+            .param("c", workspaceId).param("u", userId).query(Integer.class).optional().isPresent();
     }
 
-    /** Number of the given ids that are real, non-deactivated COORDINATOR accounts. */
+    public void deleteCoordinator(UUID workspaceId, UUID userId) {
+        jdbc.sql("DELETE FROM class_instructor WHERE class_id = :c AND user_id = :u")
+            .param("c", workspaceId).param("u", userId).update();
+    }
+
+    public void setCapabilities(UUID workspaceId, UUID userId, Collection<WorkspaceCapability> capabilities) {
+        jdbc.sql("UPDATE class_instructor SET capabilities = CAST(:caps AS text[]) WHERE class_id = :c AND user_id = :u")
+            .param("c", workspaceId).param("u", userId).param("caps", names(capabilities)).update();
+    }
+
+    private static String[] names(Collection<WorkspaceCapability> capabilities) {
+        return capabilities.stream().map(Enum::name).sorted().toArray(String[]::new);
+    }
+
+    /** The designated Owner (read it after taking the workspace lock when deciding anything with it). */
+    public Optional<UUID> ownerId(UUID workspaceId) {
+        return jdbc.sql("SELECT owner_id FROM academic_class WHERE id = :c").param("c", workspaceId).query(UUID.class).optional();
+    }
+
+    public void updateOwner(UUID workspaceId, UUID ownerId) {
+        jdbc.sql("UPDATE academic_class SET owner_id = :o, updated_at = now(), version = version + 1 WHERE id = :c")
+            .param("c", workspaceId).param("o", ownerId).update();
+    }
+
+    /** Number of ACTIVE workspaces the user is the Owner of (archived ones never block account changes). */
+    public int countActiveOwnedBy(UUID userId) {
+        return jdbc.sql("SELECT count(*) FROM academic_class WHERE owner_id = :u AND status = 'ACTIVE'")
+            .param("u", userId).query(Integer.class).single();
+    }
+
+    /** True if the workspace's Owner is still an active (non-deactivated) COORDINATOR account. */
+    public boolean ownerIsActiveCoordinator(UUID workspaceId) {
+        return jdbc.sql("""
+                SELECT 1 FROM academic_class c JOIN app_user u ON u.id = c.owner_id
+                WHERE c.id = :c AND u.role = 'COORDINATOR' AND u.status <> 'DEACTIVATED'
+                """).param("c", workspaceId).query(Integer.class).optional().isPresent();
+    }
+
+    private static final String COORDINATOR_ENTRY_SQL = """
+        SELECT ci.user_id, u.first_name, u.last_name, (c.owner_id = ci.user_id) AS is_owner, ci.capabilities, ci.assigned_at
+        FROM class_instructor ci JOIN app_user u ON u.id = ci.user_id JOIN academic_class c ON c.id = ci.class_id
+        """;
+
+    public List<CoordinatorEntry> coordinatorEntries(UUID workspaceId) {
+        return jdbc.sql(COORDINATOR_ENTRY_SQL
+                + " WHERE ci.class_id = :c ORDER BY (c.owner_id = ci.user_id) DESC, u.last_name, u.first_name, u.id")
+            .param("c", workspaceId).query(ClassRepository::mapEntry).list();
+    }
+
+    public Optional<CoordinatorEntry> coordinatorEntry(UUID workspaceId, UUID userId) {
+        return jdbc.sql(COORDINATOR_ENTRY_SQL + " WHERE ci.class_id = :c AND ci.user_id = :u")
+            .param("c", workspaceId).param("u", userId).query(ClassRepository::mapEntry).optional();
+    }
+
+    /** The Owner is shown with every capability (implicit); others with what is stored, in enum order. */
+    private static CoordinatorEntry mapEntry(ResultSet rs, int n) throws SQLException {
+        boolean owner = rs.getBoolean("is_owner");
+        Set<String> stored = new HashSet<>(Arrays.asList((String[]) rs.getArray("capabilities").getArray()));
+        List<String> caps = Arrays.stream(WorkspaceCapability.values()).map(Enum::name)
+            .filter(name -> owner || stored.contains(name)).toList();
+        return new CoordinatorEntry(rs.getObject("user_id", UUID.class), rs.getString("first_name"), rs.getString("last_name"),
+            owner, caps, rs.getObject("assigned_at", OffsetDateTime.class));
+    }
+
+    /**
+     * Number of the given ids that are real, non-deactivated COORDINATOR accounts. The rows are locked FOR SHARE so
+     * that a concurrent deactivation / role change of the same account (which takes the row FOR UPDATE) cannot
+     * slip between this check and the commit of the assignment or ownership transfer that relies on it.
+     */
+    /**
+     * Active coordinator accounts not yet assigned to the workspace whose email or name starts with {@code prefix}
+     * (already lower-cased and LIKE-escaped by the caller). Few rows, for a picker.
+     */
+    public List<CoordinatorCandidate> coordinatorCandidates(UUID workspaceId, String prefix, int limit) {
+        return jdbc.sql("""
+                SELECT u.id, u.first_name, u.last_name, u.email FROM app_user u
+                WHERE u.role = 'COORDINATOR' AND u.status <> 'DEACTIVATED'
+                  AND NOT EXISTS (SELECT 1 FROM class_instructor ci WHERE ci.class_id = :c AND ci.user_id = u.id)
+                  AND (lower(u.email) LIKE :p ESCAPE '\\' OR lower(u.last_name) LIKE :p ESCAPE '\\' OR lower(u.first_name) LIKE :p ESCAPE '\\')
+                ORDER BY u.last_name, u.first_name, u.id LIMIT :limit
+                """)
+            .param("c", workspaceId).param("p", prefix + "%").param("limit", limit)
+            .query((rs, n) -> new CoordinatorCandidate(rs.getObject("id", UUID.class), rs.getString("first_name"),
+                rs.getString("last_name"), rs.getString("email")))
+            .list();
+    }
+
     public long countAssignableInstructors(Collection<UUID> ids) {
         if (ids.isEmpty()) return 0;
-        return jdbc.sql("SELECT count(*) FROM app_user WHERE id IN (:ids) AND role = 'COORDINATOR' AND status <> 'DEACTIVATED'")
+        return jdbc.sql("""
+                SELECT count(*) FROM (
+                    SELECT id FROM app_user WHERE id IN (:ids) AND role = 'COORDINATOR' AND status <> 'DEACTIVATED'
+                    ORDER BY id FOR SHARE) locked
+                """)
             .param("ids", ids).query(Long.class).single();
     }
 
@@ -157,15 +249,15 @@ public class ClassRepository {
         List<UUID> ids = classes.stream().map(ClassView::id).toList();
         Map<UUID, List<CoordinatorRef>> byClass = new HashMap<>();
         jdbc.sql("""
-                SELECT ci.class_id, u.id, u.first_name, u.last_name
-                FROM class_instructor ci JOIN app_user u ON u.id = ci.user_id
+                SELECT ci.class_id, u.id, u.first_name, u.last_name, (c.owner_id = ci.user_id) AS is_owner
+                FROM class_instructor ci JOIN app_user u ON u.id = ci.user_id JOIN academic_class c ON c.id = ci.class_id
                 WHERE ci.class_id IN (:ids) ORDER BY u.last_name, u.first_name, u.id
                 """)
             .param("ids", ids)
             .query((rs, n) -> {
                 byClass.computeIfAbsent(rs.getObject("class_id", UUID.class), k -> new ArrayList<>())
                     .add(new CoordinatorRef(rs.getObject("id", UUID.class), rs.getString("first_name"),
-                        rs.getString("last_name")));
+                        rs.getString("last_name"), rs.getBoolean("is_owner")));
                 return 0;
             }).list();
         return classes.stream().map(c -> c.withCoordinators(byClass.getOrDefault(c.id(), List.of())))
@@ -174,15 +266,16 @@ public class ClassRepository {
 
     // ---- enrollments ----
 
-    public List<EnrollmentView> enrollments(UUID workspaceId, boolean includeRemoved) {
+    public List<EnrollmentView> enrollments(UUID workspaceId, boolean includeRemoved, int limit, int offset) {
         return jdbc.sql("""
                 SELECT u.id, u.student_number, u.last_name, u.first_name, u.middle_name, u.email,
                        u.status AS account_status, e.program, e.section, e.status, e.enrolled_at, e.removed_at
                 FROM enrollment e JOIN app_user u ON u.id = e.student_id
                 WHERE e.class_id = :c AND (:all OR e.status = 'ENROLLED')
                 ORDER BY u.last_name, u.first_name, u.id
+                LIMIT :limit OFFSET :offset
                 """)
-            .param("c", workspaceId).param("all", includeRemoved)
+            .param("c", workspaceId).param("all", includeRemoved).param("limit", limit).param("offset", offset)
             .query((rs, n) -> new EnrollmentView(rs.getObject("id", UUID.class), rs.getString("student_number"),
                 rs.getString("last_name"), rs.getString("first_name"), rs.getString("middle_name"),
                 rs.getString("email"), rs.getString("account_status"), rs.getString("program"),
@@ -190,6 +283,11 @@ public class ClassRepository {
                 rs.getObject("enrolled_at", java.time.OffsetDateTime.class),
                 rs.getObject("removed_at", java.time.OffsetDateTime.class)))
             .list();
+    }
+
+    public long countEnrollments(UUID workspaceId, boolean includeRemoved) {
+        return jdbc.sql("SELECT count(*) FROM enrollment WHERE class_id = :c AND (:all OR status = 'ENROLLED')")
+            .param("c", workspaceId).param("all", includeRemoved).query(Long.class).single();
     }
 
     public Optional<StudentRef> findStudentById(UUID id) {

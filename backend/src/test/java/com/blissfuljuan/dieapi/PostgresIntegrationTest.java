@@ -36,7 +36,7 @@ public abstract class PostgresIntegrationTest {
      */
     @BeforeEach
     void resetDatabase() {
-        baseJdbc.execute("TRUNCATE app_user, audit_log, login_attempt, outbox_event, spring_session CASCADE");
+        baseJdbc.execute("TRUNCATE app_user, audit_log, login_attempt, outbox_event, test_job, inbox_message, mail_outbox, spring_session CASCADE");
     }
 
     @DynamicPropertySource

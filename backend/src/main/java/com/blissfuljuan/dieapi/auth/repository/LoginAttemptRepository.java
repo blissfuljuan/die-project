@@ -33,6 +33,27 @@ public class LoginAttemptRepository {
             .query(Long.class).single();
     }
 
+    /** Failures of one identifier from one address, inside the window and after the identifier's last success. */
+    public long failuresForIdentifierFromIp(String identifier, String clientIp, int windowMinutes) {
+        return jdbc.sql("""
+                SELECT count(*) FROM login_attempt
+                WHERE identifier = :id AND client_ip = :ip AND NOT succeeded
+                  AND attempted_at > now() - make_interval(mins => :w)
+                  AND attempted_at > COALESCE(
+                        (SELECT max(attempted_at) FROM login_attempt WHERE identifier = :id AND succeeded),
+                        '-infinity'::timestamptz)
+                """)
+            .param("id", identifier).param("ip", clientIp).param("w", windowMinutes)
+            .query(Long.class).single();
+    }
+
+    /** Deletes attempts older than the retention period; returns the number removed. */
+    public int purgeOlderThanDays(int days) {
+        return jdbc.sql("DELETE FROM login_attempt WHERE attempted_at < now() - make_interval(days => :d)")
+            .param("d", days)
+            .update();
+    }
+
     /** Failures from one address inside the window whose identifier does NOT start with the prefix. */
     public long failuresForIpExcludingPrefix(String clientIp, String prefix, int windowMinutes) {
         return jdbc.sql("""

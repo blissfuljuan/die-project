@@ -77,10 +77,10 @@ class CrossClassIsolationIntegrationTest extends PostgresIntegrationTest {
 
     private UUID clazz(String code, UUID instructor) {
         UUID id = jdbc.queryForObject("""
-            INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section)
-            VALUES ('2025-2026', '1st', ?, 'Subject', 'A') RETURNING id
-            """, UUID.class, code);
-        jdbc.update("INSERT INTO class_instructor (class_id, user_id) VALUES (?, ?)", id, instructor);
+            WITH c AS (INSERT INTO academic_class (academic_year, semester, subject_code, subject_name, section, owner_id)
+            VALUES ('2025-2026', '1st', ?, 'Subject', 'A', ?) RETURNING id)
+            INSERT INTO class_instructor (class_id, user_id) SELECT id, ? FROM c RETURNING class_id
+            """, UUID.class, code, instructor, instructor);
         return id;
     }
 

@@ -1,4 +1,10 @@
 package com.blissfuljuan.dieapi.auth.view;
 
 /** Where to send the CSRF token (header name) and its value; the same token is also set as the XSRF-TOKEN cookie. */
-public record CsrfTokenView(String headerName, String token) {}
+public record CsrfTokenView(String headerName, String token) {
+    /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+    @Override
+    public String toString() {
+        return "CsrfTokenView[redacted]";
+    }
+}

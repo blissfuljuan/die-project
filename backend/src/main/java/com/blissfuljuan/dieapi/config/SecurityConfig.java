@@ -13,6 +13,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
 /**
@@ -26,12 +27,12 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain apiSecurity(HttpSecurity http, AccountRepository accounts, JsonAuthenticationEntryPoint entryPoint,
-                                    JsonAccessDeniedHandler deniedHandler) throws Exception {
+                                    JsonAccessDeniedHandler deniedHandler, CsrfTokenRepository csrfTokenRepository) throws Exception {
         http
             // Re-check account status/role on each authenticated request (see SessionRevalidationFilter).
             .addFilterBefore(new SessionRevalidationFilter(accounts), AuthorizationFilter.class)
             .csrf(csrf -> csrf
-                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRepository(csrfTokenRepository)
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
             .headers(h -> h.frameOptions(f -> f.deny()))
             .authorizeHttpRequests(auth -> auth
@@ -49,6 +50,18 @@ public class SecurityConfig {
             .formLogin(AbstractHttpConfigurer::disable)
             .httpBasic(AbstractHttpConfigurer::disable);
         return http.build();
+    }
+
+    /**
+     * The double-submit cookie. Readable by the SPA (HttpOnly off, by design) but SameSite=Lax like the session cookie, and
+     * replaced with a fresh value when the user signs in or out (see AuthController), so a token planted before sign-in
+     * is worthless afterwards.
+     */
+    @Bean
+    CsrfTokenRepository csrfTokenRepository() {
+        CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        repository.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
+        return repository;
     }
 
     @Bean

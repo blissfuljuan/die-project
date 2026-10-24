@@ -1,14 +1,44 @@
-# Local development stack.
-#   docker compose up -d                 -> Postgres + RabbitMQ (infrastructure only)
-#   docker compose --profile apps up -d --build   -> also API, workers, frontend (once their sources exist)
+# Local development and verification stack.
+#   docker compose up -d --build --wait     -> postgres, rabbitmq, api, orchestrator, document-worker, frontend, all healthy
+#   docker compose up -d postgres rabbitmq  -> infrastructure only (run the API from your IDE / `mvn spring-boot:run`)
+# Smoke test of the running stack: scripts/smoke.sh (bash) or scripts/smoke.ps1 (PowerShell). See docs/ops/smoke-test.md.
+#
+# Startup order is enforced with health checks (depends_on: condition: service_healthy), so `--wait` returns only when
+# every service reports healthy:
+#   postgres, rabbitmq -> api (readiness: Postgres + RabbitMQ) -> frontend;   rabbitmq -> orchestrator, document-worker
+#
+# Ports published on the host (127.0.0.1 only unless noted); the container ports never change:
+#   frontend  FRONTEND_HOST_PORT      (default 5173)  -> nginx: static SPA + same-origin proxy of /api/ to the API. THE entry point.
+#   api       API_HOST_PORT           (default 8080)  -> Spring Boot (direct access for tools/Swagger; the browser uses the frontend)
+#   postgres  POSTGRES_HOST_PORT      (default 5432)
+#   rabbitmq  RABBITMQ_AMQP_HOST_PORT (default 5672), RABBITMQ_MGMT_HOST_PORT (default 15672, management UI)
+# Another stack on the same machine: use a different project name (`docker compose -p die2 ...`) and move these ports.
+#
+# Networks: `default` carries published ports and the frontend -> api proxy. `broker` is INTERNAL (no route to the internet):
+# RabbitMQ, the API and the workers meet there, so a worker that processes untrusted documents can talk to the broker and
+# nothing else. The API also reaches the workers' health ports there (admin health report). The orchestrator will need
+# egress to the AI provider in P3; give it a second network then.
 name: die
 
 x-restart: &restart
   restart: unless-stopped
 
+x-worker-hardening: &worker-hardening
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m,mode=1777,noexec,nosuid
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+networks:
+  default: {}
+  broker:
+    internal: true
+
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     <<: *restart
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-die}
@@ -17,45 +47,67 @@ services:
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-die_app}
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set in .env}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # -h 127.0.0.1 forces TCP: during first-run initialisation the image runs a temporary server that listens on the
+      # unix socket only, and a socket check would report healthy before the API can connect over TCP.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
 
   rabbitmq:
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:3.13-management-alpine@sha256:606d8c0d6b3c18d1da9afc53bc7cdb2a8d5486df91b5a9830e9e07626c9ae281
     <<: *restart
     hostname: rabbitmq
+    networks: [default, broker]
+    # Wrapper: stock entrypoint (seeds the default user), then imports infra/rabbitmq/definitions.json.
+    entrypoint: ["sh", "/usr/local/bin/die-entrypoint.sh"]
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-die}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set in .env}
     ports:
-      - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"
+      - "127.0.0.1:${RABBITMQ_AMQP_HOST_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MGMT_HOST_PORT:-15672}:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
       - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-die.conf:ro
       - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./infra/rabbitmq/die-entrypoint.sh:/usr/local/bin/die-entrypoint.sh:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Also proves the project topology was imported: the test queue must exist.
+      test:
+        [
+          "CMD-SHELL",
+          "rabbitmq-diagnostics -q ping && rabbitmqctl -q list_queues name | grep -qx die.test.jobs",
+        ]
       interval: 10s
-      timeout: 5s
-      retries: 10
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
 
   api:
-    profiles: [apps]
-    build: ./backend
+    build:
+      context: ./backend
+      additional_contexts:
+        contracts: ./contracts/messaging
     <<: *restart
+    networks: [default, broker]
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     environment:
-      SPRING_PROFILES_ACTIVE: local
+      # `local` = development defaults (insecure cookie flag for http, log-only mail); `json-logs` = one JSON object per log line.
+      SPRING_PROFILES_ACTIVE: local,json-logs
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-die}
       DB_APP_USER: ${POSTGRES_APP_USER:-die_app}
       DB_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
@@ -64,55 +116,117 @@ services:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: ${RABBITMQ_USER:-die}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      # Worker health endpoints for GET /api/v1/ops/health (heartbeat freshness); reachable on the internal `broker` network.
+      DIE_OPS_ORCHESTRATOR_HEALTH_URL: http://orchestrator:8081/health/ready
+      DIE_OPS_DOCUMENT_WORKER_HEALTH_URL: http://document-worker:8082/health/ready
+      DIE_BOOTSTRAP_ADMIN_EMAIL: ${DIE_BOOTSTRAP_ADMIN_EMAIL:-}
+      DIE_BOOTSTRAP_ADMIN_PASSWORD: ${DIE_BOOTSTRAP_ADMIN_PASSWORD:-}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
+    healthcheck:
+      # Readiness = application up AND Postgres AND RabbitMQ reachable. (Liveness alone is /actuator/health/liveness.)
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:8080/actuator/health/readiness >/dev/null || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
     deploy:
       resources:
         limits: { cpus: "1.0", memory: 768M }
 
   orchestrator:
-    profiles: [apps]
-    build: ./workers/orchestrator
-    <<: *restart
+    build:
+      context: ./workers/orchestrator
+      additional_contexts:
+        contracts: ./contracts/messaging
+    <<: [*restart, *worker-hardening]
+    networks: [broker]
     depends_on:
-      postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     environment:
-      SPRING_PROFILES_ACTIVE: local
-      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-die}
-      DB_APP_USER: ${POSTGRES_APP_USER:-die_app}
-      DB_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: ${RABBITMQ_USER:-die}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
-      AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:-}
+      HEALTH_PORT: "8081"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "java",
+          "-cp",
+          "/app/app.jar",
+          "com.blissfuljuan.die.orchestrator.HealthProbe",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 768M }
+        limits: { cpus: "1.0", memory: 512M, pids: 256 }
 
   document-worker:
-    profiles: [apps]
-    build: ./workers/document-analysis
-    <<: *restart
+    build:
+      context: ./workers/document-analysis
+      additional_contexts:
+        contracts: ./contracts/messaging
+    <<: [*restart, *worker-hardening]
+    networks: [broker]
     depends_on:
       rabbitmq: { condition: service_healthy }
     environment:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: ${RABBITMQ_USER:-die}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
-    read_only: true
-    tmpfs:
-      - /tmp:size=256m
+      HEALTH_PORT: "8082"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8082/health/ready', timeout=3).status == 200 else 1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 512M }
+        limits: { cpus: "1.0", memory: 512M, pids: 256 }
 
   frontend:
-    profiles: [apps]
     build: ./frontend
+    <<: *restart
+    depends_on:
+      # nginx resolves the `api` upstream when it starts, so the API must already exist.
+      api: { condition: service_healthy }
     ports:
-      - "5173:8080"
-    depends_on: [api]
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-5173}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # Serves the SPA and proxies /api/ to the API: the status endpoint answering through nginx proves the proxy works.
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:8080/api/v1/status || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128M, pids: 128 }
 
 volumes:
   postgres-data:

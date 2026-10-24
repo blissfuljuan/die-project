@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: die-document-worker
+Version: 0.1.0
+Summary: DIE document-analysis worker (P0-VS04: broker connectivity; DOCX/PDF parsing arrives in P2)
+Requires-Python: >=3.12
+Requires-Dist: pika==1.3.2
+Requires-Dist: jsonschema==4.23.0
+Provides-Extra: test
+Requires-Dist: pytest==8.3.3; extra == "test"

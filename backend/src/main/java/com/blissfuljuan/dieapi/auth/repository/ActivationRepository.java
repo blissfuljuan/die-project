@@ -24,7 +24,7 @@ public class ActivationRepository {
         String where = id.contains("@") ? "lower(u.email) = :id" : "lower(u.student_number) = :id";
         String sql = """
             SELECT u.id, u.first_name, u.last_name, u.email, (u.email_verified_at IS NOT NULL) AS ev,
-                   c.id AS cid, c.secret_hash, c.expires_at
+                   c.id AS cid, c.secret_hash, c.expires_at, c.locked_until
             FROM app_user u JOIN temp_credential c ON c.user_id = u.id AND c.invalidated_at IS NULL
             WHERE u.status = 'PENDING_ACTIVATION'
             """ + " AND " + where + " FOR UPDATE OF c";
@@ -33,21 +33,32 @@ public class ActivationRepository {
             .query((rs, n) -> new PendingActivation(
                 rs.getObject("id", UUID.class), rs.getString("first_name"), rs.getString("last_name"),
                 rs.getString("email"), rs.getBoolean("ev"), rs.getObject("cid", UUID.class),
-                rs.getString("secret_hash"), rs.getObject("expires_at", OffsetDateTime.class)))
+                rs.getString("secret_hash"), rs.getObject("expires_at", OffsetDateTime.class),
+                rs.getObject("locked_until", OffsetDateTime.class)))
             .optional();
     }
 
-    /** Sets the chosen password and email; keeps verification (and activates) only when {@code keepVerified}. */
-    public void applyChosenCredentials(UUID userId, String passwordHash, String email, boolean keepVerified) {
+    /** True when another account already uses this address (case-insensitive). */
+    public boolean emailUsedByAnother(UUID userId, String email) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM app_user WHERE lower(email) = lower(:e) AND id <> :u)")
+            .param("e", email).param("u", userId)
+            .query(Boolean.class).single();
+    }
+
+    /**
+     * Sets the chosen password and email. The account stays PENDING_ACTIVATION until the emailed link is used; a
+     * verified address that is kept ({@code sameVerifiedAddress}) keeps its verification timestamp so it still counts
+     * as locked if activation is started again.
+     */
+    public void applyChosenCredentials(UUID userId, String passwordHash, String email, boolean sameVerifiedAddress) {
         jdbc.sql("""
                 UPDATE app_user SET password_hash = :hash, email = :email,
                        email_verified_at = CASE WHEN :keep THEN email_verified_at ELSE NULL END,
-                       status = CASE WHEN :keep THEN 'ACTIVE' ELSE status END,
                        updated_at = now(), version = version + 1
                 WHERE id = :id
                 """)
             .param("hash", passwordHash).param("email", email)
-            .param("keep", keepVerified).param("id", userId)
+            .param("keep", sameVerifiedAddress).param("id", userId)
             .update();
     }
 

@@ -1,0 +1,7 @@
+# Structured (JSON) console logs for deployed environments: SPRING_PROFILES_ACTIVE=json-logs (alone on Render,
+# or combined with local: SPRING_PROFILES_ACTIVE=local,json-logs as the Compose stack does).
+# One JSON object per line. The MDC entries (requestId = the X-Request-Id correlation id, correlationId) become top-level fields.
+logging:
+  structured:
+    format:
+      console: logstash

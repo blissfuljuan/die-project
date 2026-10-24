@@ -1,8 +1,25 @@
 # Integration tests: capture mail in-process, no SMTP.
 die:
+  messaging:
+    # Only the messaging integration tests switch the broker on (they start RabbitMQ with Testcontainers).
+    enabled: false
   mail:
     mode: log
+    # Deliver queued mail right after commit so tests can read it; production dispatches in the background.
+    dispatch: inline
   bootstrap:
     # Never create an administrator at startup, whatever a developer's environment says.
     admin-email: ""
     admin-password: ""
+  roster:
+    purge:
+      # Tests call RosterImportPurger.purgeOnce() themselves.
+      enabled: false
+  auth:
+    purge:
+      # Tests call LoginAttemptPurger.purgeOnce() themselves.
+      enabled: false
+  ops:
+    reaper:
+      # Tests call StaleJobReaper.reapOnce() themselves; a background pass would race their fixtures.
+      enabled: false

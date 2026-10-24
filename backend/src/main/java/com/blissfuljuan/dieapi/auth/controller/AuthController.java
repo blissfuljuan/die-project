@@ -19,6 +19,7 @@ import org.springframework.security.web.authentication.logout.SecurityContextLog
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.web.bind.annotation.*;
 
 /** Sign-in, sign-out and "who am I". Decisions live in AuthService; this class only does HTTP and session plumbing. */
@@ -27,15 +28,23 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     public record LoginRequest(@NotBlank @Size(max = 254) String email,
-                               @NotBlank @Size(max = 128) String password) {}
+                               @NotBlank @Size(max = 128) String password) {
+        /** Never print secrets: records are logged by Spring at DEBUG ("Read ... to [Request[...]]"). */
+        @Override
+        public String toString() {
+            return "LoginRequest[redacted]";
+        }
+    }
 
     private final SecurityContextHolderStrategy contextStrategy = SecurityContextHolder.getContextHolderStrategy();
     private final SecurityContextRepository contextRepository = new HttpSessionSecurityContextRepository();
 
     private final AuthService auth;
+    private final CsrfTokenRepository csrfTokens;
 
-    public AuthController(AuthService auth) {
+    public AuthController(AuthService auth, CsrfTokenRepository csrfTokens) {
         this.auth = auth;
+        this.csrfTokens = csrfTokens;
     }
 
     /** SPA calls this first; returning the token makes Spring set the XSRF-TOKEN cookie. */
@@ -56,6 +65,7 @@ public class AuthController {
         context.setAuthentication(authentication);
         contextStrategy.setContext(context);
         contextRepository.saveContext(context, request, response);
+        rotateCsrfToken(request, response);
 
         return toView((AppUserDetails) authentication.getPrincipal());
     }
@@ -71,6 +81,12 @@ public class AuthController {
                        HttpServletRequest request, HttpServletResponse response) {
         new SecurityContextLogoutHandler().logout(request, response, authentication);
         auth.recordLogout(user);
+        rotateCsrfToken(request, response);
+    }
+
+    /** A new CSRF token whenever the identity changes; the SPA re-reads the cookie on every request. */
+    private void rotateCsrfToken(HttpServletRequest request, HttpServletResponse response) {
+        csrfTokens.saveToken(csrfTokens.generateToken(request), request, response);
     }
 
     private static MeResponse toView(AppUserDetails u) {

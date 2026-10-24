@@ -10,9 +10,8 @@ import com.blissfuljuan.dieapi.auth.model.ResetLink;
 import com.blissfuljuan.dieapi.auth.model.rule.ThrottleBucket;
 import com.blissfuljuan.dieapi.auth.repository.PasswordRepository;
 import org.springframework.context.ApplicationEventPublisher;
-import com.blissfuljuan.dieapi.common.util.AfterCommit;
 import com.blissfuljuan.dieapi.common.util.Tokens;
-import com.blissfuljuan.dieapi.mail.service.EmailSender;
+import com.blissfuljuan.dieapi.mail.service.MailQueue;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -36,14 +35,14 @@ public class PasswordService {
     private final PasswordPolicy policy;
     private final LoginThrottleService throttle;
     private final SessionRevocationService sessions;
-    private final EmailSender mail;
+    private final MailQueue mail;
     private final ApplicationEventPublisher events;
     private final int resetMinutes;
     private final String frontendBaseUrl;
 
     public PasswordService(PasswordRepository repository, PasswordEncoder encoder, PasswordPolicy policy,
                            LoginThrottleService throttle, SessionRevocationService sessions,
-                           EmailSender mail, ApplicationEventPublisher events,
+                           MailQueue mail, ApplicationEventPublisher events,
                            @Value("${die.auth.password-reset-minutes:60}") int resetMinutes,
                            @Value("${die.frontend-base-url:http://localhost:5173}") String frontendBaseUrl) {
         this.repository = repository;
@@ -84,7 +83,7 @@ public class PasswordService {
             + frontendBaseUrl + "/reset-password?token=" + token + "\n\nThis link expires in " + resetMinutes
             + " minutes and works once. If you did not ask for this, you can ignore this message; "
             + "your password has not changed.\n";
-        AfterCommit.run("password reset email", () -> mail.send(a.email(), "Reset your password", body));
+        mail.enqueue(a.email(), "Reset your password", body);
     }
 
     /** Completes a reset: new password, all sessions revoked, login lockout cleared (ownership of the email is proven). */
@@ -135,6 +134,6 @@ public class PasswordService {
         String body = "Hello " + firstName + ",\n\nThe password of your Document-Implementation Evaluator "
             + "account was just changed and you were signed out of your other sessions. If this was not "
             + "you, reset your password immediately and contact your administrator.\n";
-        AfterCommit.run("password changed notice", () -> mail.send(email, "Your password was changed", body));
+        mail.enqueue(email, "Your password was changed", body);
     }
 }

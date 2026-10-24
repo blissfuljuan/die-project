@@ -1,0 +1,18 @@
+# Keeps pinned base-image digests, actions and dependencies current (the Dockerfiles pin images by digest).
+version: 2
+updates:
+  - package-ecosystem: docker
+    directories: ["/backend", "/workers/orchestrator", "/workers/document-analysis", "/frontend", "/infra/render"]
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly }
+  - package-ecosystem: maven
+    directories: ["/backend", "/workers/orchestrator"]
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule: { interval: weekly }
+  - package-ecosystem: pip
+    directory: "/workers/document-analysis"
+    schedule: { interval: weekly }

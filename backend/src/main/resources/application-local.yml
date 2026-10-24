@@ -17,7 +17,15 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/die}
     user: ${DB_MIGRATOR_USER:postgres}
     password: ${DB_MIGRATOR_PASSWORD:postgres}
-# Development only: print emails (with activation/reset links) instead of sending them.
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+# Development only: print emails (with activation/reset links) instead of sending them; RabbitMQ defaults.
 die:
   mail:
     mode: log
+  messaging:
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}

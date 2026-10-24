@@ -59,8 +59,9 @@ public class ProjectController {
     }
 
     @GetMapping("/workspaces/{workspaceId}/projects")
-    public List<ProjectView> list(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID workspaceId) {
-        return queries.list(user, workspaceId);
+    public ProjectPage list(@AuthenticationPrincipal AppUserDetails user, @PathVariable UUID workspaceId,
+                            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
+        return queries.list(user, workspaceId, page, size);
     }
 
     @PostMapping("/workspaces/{workspaceId}/projects")
